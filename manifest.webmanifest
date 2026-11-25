@@ -1,0 +1,9 @@
+{
+  "name": "士業ドパミンクエスト",
+  "short_name": "士業クエスト",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f4f5fa",
+  "theme_color": "#f4f5fa",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

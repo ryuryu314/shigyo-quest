@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>士業クエスト — 自動チェック</title>
+<style>body{font:14px/1.6 "BIZ UDPGothic","Yu Gothic UI",system-ui,sans-serif;margin:20px;color:#22243a}h1{font-size:20px}pre{white-space:pre-wrap;background:#f7f6fb;border:1px solid #e8e6f1;border-radius:10px;padding:12px}.ok{color:#17825e}.ng{color:#c0392b;font-weight:700}</style>
+</head>
+<body>
+<h1>士業ドパミンクエスト — 自動チェック</h1>
+<p id="sum">実行中…</p>
+<pre id="out"></pre>
+<script src="../js/core.js"></script>
+<script src="../data/exams.js"></script>
+<script src="../data/q-yobi.js"></script>
+<script src="../data/q-cpa.js"></script>
+<script src="../data/q-shoshi.js"></script>
+<script src="../data/q-benri.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/engine.js"></script>
+<script>
+(function () {
+  'use strict';
+  const out = [], fails = [];
+  const log = s => out.push(s);
+  const check = (cond, msg) => { if (cond) log('  ok  ' + msg); else { log('  NG  ' + msg); fails.push(msg); } };
+
+  // 記録はテスト用に分ける（本物の記録を汚さない）
+  SQ.store.reset();
+
+  /* 1. データ検証 */
+  const errs = SQ.validate();
+  log('■ データ検証：' + SQ.Q.length + '問');
+  errs.forEach(e => log('  NG  ' + e));
+  check(errs.length === 0, 'データの問題がない');
+
+  /* 2. 正解を選ぶ・外す関数 */
+  function solve(it, good) {
+    const q = it.q;
+    if (q.kind === 'mcq') {
+      if (q.form === 'tf') it.ans = q.st.map(s => good ? s[2] : !s[2]);
+      else { const k = SQ.mcqKey(q); it.ans = good ? k.answer : (k.answer + 1) % k.choices.length; }
+      it.score = SQ.judgeMcq(q, it.ans).score;
+    } else if (q.kind === 'case') {
+      q.steps.forEach((s, i) => {
+        const right = s.options.map((o, k) => o[1] ? k : -1).filter(k => k >= 0);
+        const wrong = s.options.map((o, k) => o[1] ? -1 : k).filter(k => k >= 0);
+        it.stepAns[i] = s.type === 'multi' ? (good ? right : wrong) : (good ? right[0] : wrong[0]);
+        it.stepScore[i] = SQ.judgeStep(s, it.stepAns[i]).score;
+      });
+      it.score = SQ.caseScore(q, it.stepScore);
+    } else {
+      it.turnScore = q.turns.map(() => good ? 1 : 0);
+      it.score = SQ.oralScore(q, it.turnScore);
+    }
+    it.done = true;
+  }
+
+  /* 3. 各段階：全問正解なら合格、全問不正解なら不合格 */
+  log('\n■ 段階ごとの判定');
+  SQ.EXAMS.forEach(e => e.stages.forEach(s => {
+    const good = SQ.newRun({ exam: e.id, stage: s.id, mode: 'practice' });
+    good.items.forEach(it => solve(it, true));
+    const rg = SQ.evalRun(good);
+    check(rg.pass === true && Math.abs(rg.ratio - 1) < 1e-9, e.short + ' ' + s.name + '：全問正解で合格（' + SQ.round1(rg.score) + ' / ' + rg.of + '、' + good.items.length + '問）');
+    const bad = SQ.newRun({ exam: e.id, stage: s.id, mode: 'practice' });
+    bad.items.forEach(it => solve(it, false));
+    const rb = SQ.evalRun(bad);
+    check(rb.pass === false && rb.ratio < 0.01, e.short + ' ' + s.name + '：全問不正解で不合格（得点率 ' + Math.round(rb.ratio * 100) + '%）');
+  }));
+
+  /* 4. 足切り・基準点 */
+  log('\n■ 足切り・基準点');
+  (function () {
+    const r = SQ.newRun({ exam: 'cpa', stage: 'tanto', mode: 'practice' });
+    r.items.forEach(it => solve(it, it.q.sec !== 'kigyo'));
+    const res = SQ.evalRun(r);
+    check(res.ratio >= 0.7 && res.pass === false, '会計士 短答：企業法0点なら合計80%でも不合格（' + Math.round(res.ratio * 100) + '%）');
+  })();
+  (function () {
+    const r = SQ.newRun({ exam: 'shoshi', stage: 'hikki', mode: 'practice' });
+    r.items.forEach(it => solve(it, it.q.sec !== 'kijutsu'));
+    const res = SQ.evalRun(r);
+    check(res.pass === false, '司法書士 筆記：記述0点なら不合格（合計 ' + SQ.round1(res.score) + '）');
+  })();
+  (function () {
+    const r = SQ.newRun({ exam: 'benri', stage: 'koujutsu', mode: 'practice' });
+    r.items.forEach(it => solve(it, it.q.sec === 'tokkyo'));
+    const res = SQ.evalRun(r);
+    check(res.pass === false && res.abc === 'A C C', '弁理士 口述：C評価2科目で不合格（' + res.abc + '）');
+    const r2 = SQ.newRun({ exam: 'benri', stage: 'koujutsu', mode: 'practice' });
+    r2.items.forEach(it => solve(it, it.q.sec !== 'shohyo'));
+    const res2 = SQ.evalRun(r2);
+    check(res2.pass === true && res2.abc === 'A A C', '弁理士 口述：C評価1科目なら合格（' + res2.abc + '）');
+  })();
+  (function () {
+    const r = SQ.newRun({ exam: 'yobi', stage: 'koujutsu', mode: 'practice' });
+    r.items.forEach(it => { solve(it, true); if (it.q.sec === 'keiji') { it.turnScore = [1, 0, 0]; it.score = SQ.oralScore(it.q, it.turnScore); } });
+    const res = SQ.evalRun(r);
+    check(res.pass === true && res.score === 63 + 59, '予備 口述：民事満点＋刑事1/3で 63＋59＝122 合格（' + res.score + '）');
+  })();
+  (function () {
+    const r = SQ.newRun({ exam: 'yobi', stage: 'tanto', mode: 'practice' });
+    const tf = r.items.find(it => it.q.form === 'tf');
+    tf.ans = tf.q.st.map((s, i) => i === 0 ? !s[2] : s[2]);
+    check(Math.abs(SQ.judgeMcq(tf.q, tf.ans).score - 1 / 3) < 1e-9, '各肢の正誤：1つ違いは3分の1');
+  })();
+
+  /* 5. 本試験ロードと免除 */
+  log('\n■ 本試験ロードと免除');
+  const P = { pass: true, score: 1, of: 1 }, F = { pass: false, score: 0, of: 1 };
+  const st = id => SQ.exam(id).stages[SQ.road(id).stage].id;
+  check(SQ.roadApply('cpa', 'tanto', P) === 'next' && st('cpa') === 'ronbun', '会計士：短答合格 → 論文へ');
+  SQ.roadApply('cpa', 'ronbun', F);
+  check(SQ.road('cpa').year === 2 && st('cpa') === 'ronbun', '会計士：論文不合格 → 2年目は短答免除で論文から');
+  SQ.roadApply('cpa', 'ronbun', F);
+  check(st('cpa') === 'ronbun', '会計士：3年目も短答免除');
+  SQ.roadApply('cpa', 'ronbun', F);
+  check(st('cpa') === 'tanto', '会計士：4年目は短答から（免除は2年）');
+  check(SQ.roadApply('cpa', 'tanto', P) === 'next' && SQ.roadApply('cpa', 'ronbun', P) === 'final' && SQ.road('cpa').wins === 1, '会計士：最終合格で合格証');
+
+  SQ.roadApply('benri', 'tanto', P); SQ.roadApply('benri', 'ronbun', P); SQ.roadApply('benri', 'koujutsu', F);
+  check(st('benri') === 'koujutsu', '弁理士：口述不合格 → 翌年は短答・論文免除で口述から');
+  SQ.roadApply('benri', 'koujutsu', F); SQ.roadApply('benri', 'koujutsu', F);
+  check(st('benri') === 'tanto', '弁理士：免除2年が切れたら短答から');
+
+  SQ.roadApply('yobi', 'tanto', P); SQ.roadApply('yobi', 'ronbun', F);
+  check(st('yobi') === 'tanto' && SQ.road('yobi').year === 2, '予備試験：論文不合格 → 翌年は短答から（免除なし）');
+
+  SQ.roadApply('shoshi', 'hikki', P); SQ.roadApply('shoshi', 'koujutsu', F);
+  check(st('shoshi') === 'koujutsu', '司法書士：口述不合格 → 次回は筆記免除');
+  SQ.roadApply('shoshi', 'koujutsu', F);
+  check(st('shoshi') === 'hikki', '司法書士：筆記免除は次回だけ');
+
+  /* 6. レベル */
+  log('\n■ レベル');
+  check(SQ.levelOf(0).lv === 1 && SQ.levelOf(59).lv === 1 && SQ.levelOf(60).lv === 2 && SQ.levelOf(150).lv === 3, 'レベルの境目（60・150）');
+
+  /* 7. 正解一覧（目視確認用） */
+  log('\n■ 択一の正解一覧');
+  SQ.Q.filter(q => q.kind === 'mcq').forEach(q => {
+    const k = SQ.mcqKey(q);
+    const ans = q.form === 'tf' ? q.st.map(s => s[0] + (s[2] ? '1' : '2')).join(' ') : (k.answer + 1) + '（' + k.choices[k.answer].text.slice(0, 24) + '）';
+    log('  ' + q.id.padEnd(20) + ' ' + q.form.padEnd(6) + ' ' + ans);
+  });
+
+  SQ.store.reset();
+  try { localStorage.removeItem('shigyo-quest-v1'); } catch (e) { /* noop */ }
+  document.getElementById('out').textContent = out.join('\n');
+  const sum = document.getElementById('sum');
+  sum.className = fails.length ? 'ng' : 'ok';
+  sum.textContent = fails.length ? 'NG ' + fails.length + '件：' + fails.join(' / ') : 'すべてOK（' + out.filter(s => s.startsWith('  ok')).length + '項目）';
+  document.title = (fails.length ? 'NG ' : 'OK ') + document.title;
+})();
+</script>
+</body>
+</html>
