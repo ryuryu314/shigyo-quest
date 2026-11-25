@@ -10,7 +10,7 @@
 (function () {
   'use strict';
   const SQ = window.SQ = window.SQ || {};
-  SQ.VERSION = '0.1.0';
+  SQ.VERSION = '0.2.0';
   SQ.Q = [];
   SQ.byId = {};
   SQ.dataErrors = [];
@@ -28,6 +28,8 @@
   SQ.kase = (path, o) => register('case', path, o);
   SQ.oral = (path, o) => register('oral', path, o);
 
+  SQ.EASY = SQ.EASY || {};
+  SQ.easyOf = q => (SQ.EASY && SQ.EASY[q.id]) || q.easy || '';
   SQ.exam = id => SQ.EXAMS.find(e => e.id === id);
   SQ.stage = (examId, stageId) => { const e = SQ.exam(examId); return e && e.stages.find(s => s.id === stageId); };
 
@@ -90,6 +92,7 @@
       if (!stage) { err.push(where + '試験・段階が見つからない（' + q.exam + '/' + q.stage + '）'); continue; }
       if (!stage.sections.some(s => s.id === q.sec)) err.push(where + '採点区分が見つからない（' + q.sec + '）');
       if (!q.title) err.push(where + 'title がない');
+      if (!SQ.easyOf(q)) err.push(where + '「かんたんに言うと」がない（data/easy.js）');
       if (q.kind === 'mcq') {
         if (!['one', 'combo', 'count', 'pick', 'tf'].includes(q.form)) { err.push(where + 'form が不正（' + q.form + '）'); continue; }
         if (!q.q) err.push(where + '問題文 q がない');

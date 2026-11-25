@@ -3,8 +3,9 @@
   'use strict';
   const SQ = window.SQ;
   const KEY = 'shigyo-quest-v1';
-  const DEF_SET = { vol: 60, fx: true, voice: true, oralTimer: true, examTimer: false, goal: 20 };
-  const fresh = () => ({ v: 1, xp: 0, days: {}, stats: {}, roads: {}, best: {}, targets: {}, set: Object.assign({}, DEF_SET), created: Date.now() });
+  const DEF_SET = { vol: 60, fx: true, voice: true, goal: 20 };
+  // suspended: 中断した挑戦（1つだけ）。SQ.saveRun の形
+  const fresh = () => ({ v: 1, xp: 0, days: {}, stats: {}, roads: {}, best: {}, targets: {}, suspended: null, set: Object.assign({}, DEF_SET), created: Date.now() });
 
   let S = fresh();
   function load() {
@@ -14,6 +15,7 @@
         const d = JSON.parse(raw);
         S = Object.assign(fresh(), d);
         S.set = Object.assign({}, DEF_SET, d.set || {});
+        delete S.set.oralTimer; delete S.set.examTimer;
       }
     } catch (e) { S = fresh(); }
     return S;

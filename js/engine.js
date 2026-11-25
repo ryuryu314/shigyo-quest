@@ -8,8 +8,6 @@
 
   SQ.poolOf = (examId, stageId, secId) => SQ.Q.filter(q => q.exam === examId && q.stage === stageId && (!secId || q.sec === secId));
   SQ.secOf = q => { const st = SQ.stage(q.exam, q.stage); return st && st.sections.find(s => s.id === q.sec); };
-  // 1問あたりの目安時間（秒）。口述は質問の数で決める。
-  SQ.paceOf = q => q.kind === 'oral' ? q.turns.length * 35 : ((SQ.secOf(q) || {}).perQ || 120);
 
   /* ---------- 1回分の挑戦（ラン）を作る ---------- */
   // opt: { exam, stage, mode: 'road' | 'practice', ids?: [...], label? }
@@ -21,18 +19,40 @@
     items.forEach(q => { const k = q.exam + '/' + q.stage + '/' + q.sec; count[k] = (count[k] || 0) + 1; });
     const slots = items.map(q => {
       const sec = SQ.secOf(q), k = q.exam + '/' + q.stage + '/' + q.sec;
-      return {
-        id: q.id, q, max: stage ? sec.points / count[k] : 1,
-        ans: null, score: null, done: false, flag: false, t: 0,
-        step: 0, stepAns: [], stepScore: [], turn: 0, tries: 0, turnScore: [], started: false
-      };
+      return Object.assign({ id: q.id, q, max: stage ? sec.points / count[k] : 1 }, blankItem());
     });
-    const pace = slots.reduce((a, s) => a + SQ.paceOf(s.q), 0);
+    // 制限時間はない。elapsed は止まっていない間だけ数えた秒数（結果画面に出す）。
     return {
       exam: opt.exam || null, stage: stage ? stage.id : null, mode: opt.mode || 'practice', label: opt.label || '',
-      items: slots, idx: 0, started: Date.now(), elapsed: 0, pace,
-      combo: 0, maxCombo: 0, get: 0, xp: 0, finished: false
+      items: slots, idx: 0, started: Date.now(), elapsed: 0,
+      combo: 0, maxCombo: 0, get: 0, xp: 0, peeked: 0, interrupted: false, paused: false, lastJudge: null, finished: false
     };
+  };
+  const ITEM_KEYS = ['ans', 'score', 'done', 'flag', 'step', 'stepAns', 'stepScore', 'stepView', 'turn', 'tries', 'turnScore', 'started', 'oralPhase', 'wrongPick', 'lastPick', 'react', 'revealed', 'dock'];
+  function blankItem() {
+    return { ans: null, score: null, done: false, flag: false, step: 0, stepAns: [], stepScore: [], stepView: null, turn: 0, tries: 0, turnScore: [], started: false, oralPhase: null, wrongPick: null, lastPick: null, react: '', revealed: false, dock: false };
+  }
+
+  /* ---------- 中断と再開（このブラウザに保存） ---------- */
+  const RUN_KEYS = ['exam', 'stage', 'mode', 'label', 'idx', 'started', 'elapsed', 'combo', 'maxCombo', 'get', 'xp', 'peeked', 'interrupted', 'lastJudge'];
+  SQ.saveRun = function (run) {
+    const d = { v: 1, ids: run.items.map(it => it.id), items: run.items.map(it => { const o = {}; ITEM_KEYS.forEach(k => { o[k] = it[k]; }); return o; }) };
+    RUN_KEYS.forEach(k => { d[k] = run[k]; });
+    return JSON.parse(JSON.stringify(d));
+  };
+  // 問題が消えていたり、構成が変わっていたら null（再開できない）
+  SQ.loadRun = function (d) {
+    try {
+      if (!d || d.v !== 1 || !Array.isArray(d.ids) || !d.ids.length || d.ids.some(id => !SQ.byId[id])) return null;
+      if (d.stage && !SQ.stage(d.exam, d.stage)) return null;
+      const run = SQ.newRun({ exam: d.exam, stage: d.stage, mode: d.mode, ids: d.ids, label: d.label });
+      RUN_KEYS.forEach(k => { if (d[k] !== undefined) run[k] = d[k]; });
+      run.items.forEach((it, i) => { const o = d.items[i] || {}; ITEM_KEYS.forEach(k => { if (o[k] !== undefined) it[k] = o[k]; }); });
+      run.idx = SQ.clamp(Math.floor(run.idx) || 0, 0, run.items.length - 1);
+      run.elapsed = Number.isFinite(run.elapsed) && run.elapsed >= 0 ? run.elapsed : 0;
+      run.paused = false; run.finished = false;
+      return run;
+    } catch (e) { return null; }
   };
 
   /* ---------- 採点 ---------- */

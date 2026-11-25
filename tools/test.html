@@ -16,6 +16,7 @@
 <script src="../data/q-cpa.js"></script>
 <script src="../data/q-shoshi.js"></script>
 <script src="../data/q-benri.js"></script>
+<script src="../data/easy.js"></script>
 <script src="../js/store.js"></script>
 <script src="../js/engine.js"></script>
 <script>
@@ -132,11 +133,32 @@
   SQ.roadApply('shoshi', 'koujutsu', F);
   check(st('shoshi') === 'hikki', '司法書士：筆記免除は次回だけ');
 
-  /* 6. レベル */
+  /* 6. 中断と再開 */
+  log('\n■ 中断と再開');
+  (function () {
+    const r = SQ.newRun({ exam: 'shoshi', stage: 'hikki', mode: 'road' });
+    solve(r.items[0], true); solve(r.items[1], false);
+    r.items[2].ans = 1; r.items[3].flag = true; r.items[4].revealed = true; r.items[4].dock = true;
+    const kase = r.items.find(it => it.q.kind === 'case');
+    kase.step = 2; kase.stepAns = [0, 0]; kase.stepScore = [1, 0];
+    r.idx = 5; r.elapsed = 123.4; r.combo = 2; r.get = 7.5; r.peeked = 1; r.interrupted = true;
+    const saved = JSON.parse(JSON.stringify(SQ.saveRun(r)));
+    const back = SQ.loadRun(saved);
+    check(!!back && back.items.length === r.items.length, '保存した挑戦を読み戻せる');
+    check(back.idx === 5 && back.elapsed === 123.4 && back.combo === 2 && back.get === 7.5 && back.peeked === 1, '位置・時間・コンボ・GET・解答を見た数が戻る');
+    check(back.items[0].done && back.items[0].score === 1 && back.items[1].score === 0 && back.items[2].ans === 1 && back.items[3].flag && back.items[4].revealed, '各問の解答・正誤・見直し・解答を見た印が戻る');
+    const bk = back.items.find(it => it.q.kind === 'case');
+    check(bk.step === 2 && bk.stepScore[0] === 1 && bk.stepAns[1] === 0, '論文・記述のとちゅうの段落が戻る');
+    check(back.mode === 'road' && back.stage === 'hikki' && Math.abs(back.items[0].max - r.items[0].max) < 1e-9, 'モード・段階・配点が戻る');
+    const broken = JSON.parse(JSON.stringify(saved)); broken.ids[0] = 'no-such-id';
+    check(SQ.loadRun(broken) === null, '問題が消えた中断データは読み込まない');
+  })();
+
+  /* 7. レベル */
   log('\n■ レベル');
   check(SQ.levelOf(0).lv === 1 && SQ.levelOf(59).lv === 1 && SQ.levelOf(60).lv === 2 && SQ.levelOf(150).lv === 3, 'レベルの境目（60・150）');
 
-  /* 7. 正解一覧（目視確認用） */
+  /* 8. 正解一覧（目視確認用） */
   log('\n■ 択一の正解一覧');
   SQ.Q.filter(q => q.kind === 'mcq').forEach(q => {
     const k = SQ.mcqKey(q);
