@@ -172,14 +172,17 @@
   };
 
   /* ---------- 採点 ---------- */
-  // 各記述の正誤（tf）は、全部合えば満点、3つ以上の記述で1つ違いなら3分の1（本番も部分点がある問題があるが、
-  // 基準は問題文に書かれない。本アプリは「3点の問題で1つ誤りは1点」に当たる近似）
+  // 各記述の正誤（tf）は、全部合えば満点。部分点は予備試験の「正解及び配点」（令和8年）どおり、3点の問題で
+  //   解答欄3つ → 2つ正解で1点（3分の1）、解答欄4つ → 3つ正解で2点（3分の2）。それ以外は0点。
+  //   部分点の基準は本番でも問題文には書かれない。
+  SQ.TF_PARTIAL = { 3: { 2: 1 / 3 }, 4: { 3: 2 / 3 } };
   SQ.judgeMcq = function (q, ans) {
     if (q.form === 'tf') {
       const n = q.st.length;
       let ok = 0;
       q.st.forEach((s, i) => { if (ans && ans[i] === s[2]) ok++; });
-      return { score: ok === n ? 1 : (n >= 3 && ok === n - 1 ? 1 / 3 : 0), ok, n };
+      const part = (SQ.TF_PARTIAL[n] || {})[ok];
+      return { score: ok === n ? 1 : (part || 0), ok, n };
     }
     const key = SQ.mcqKey(q);
     return { score: ans === key.answer ? 1 : 0, correct: key.answer };

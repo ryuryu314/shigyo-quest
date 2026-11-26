@@ -105,7 +105,10 @@
     const r = SQ.newRun({ exam: 'yobi', stage: 'tanto', mode: 'practice' });
     const tf = r.items.find(it => it.q.form === 'tf');
     tf.ans = tf.q.st.map((s, i) => i === 0 ? !s[2] : s[2]);
-    check(Math.abs(SQ.judgeMcq(tf.q, tf.ans).score - 1 / 3) < 1e-9, '各肢の正誤：1つ違いは3分の1');
+    check(Math.abs(SQ.judgeMcq(tf.q, tf.ans).score - 1 / 3) < 1e-9, '各記述の正誤（解答欄3つ）：2つ正解で3点中1点（令和8年の正解及び配点）');
+    const four = { kind: 'mcq', form: 'tf', st: [['ア', 'a', true], ['イ', 'b', false], ['ウ', 'c', true], ['エ', 'd', false]] };
+    const s3 = SQ.judgeMcq(four, [true, false, true, true]).score, s2 = SQ.judgeMcq(four, [true, true, true, true]).score;
+    check(Math.abs(s3 - 2 / 3) < 1e-9 && s2 === 0, '各記述の正誤（解答欄4つ）：3つ正解で3点中2点、2つ正解は0点');
   })();
 
   /* 5. 本試験ロードと免除 */
@@ -186,6 +189,12 @@
     check(set.size === 2 && set.has(ky[1]) && set.has(ky[2]) && !set.has(ky[3]), '一般教養：指定数を超えて選ぶと、問題番号の小さい方から採点（選択3題 → 第' + ky[1].no + '問・第' + ky[2].no + '問）');
     const ry = SQ.evalRun(y), sk = ry.secs.find(s => s.sec.id === 'kyoyo');
     check(Math.abs(sk.ratio - 0.5) < 1e-9 && Math.abs(sk.show - 30) < 1e-9, '一般教養：採点した2題のうち1題正解で 30 / 60（' + SQ.round1(sk.show) + '）');
+
+    check(y.periods.map(p => p.time).join() === '9:45〜11:15,12:00〜13:00,14:15〜15:15,16:00〜17:30', '予備 短答：時刻は受験案内どおり（' + y.periods.map(p => p.time).join(' / ') + '）');
+    const yr = SQ.newRun({ exam: 'yobi', stage: 'ronbun', mode: 'road' });
+    check(yr.items[0].q.sec === 'keiho' && yr.periods.map(p => p.day + ':' + p.time).join() === '1:13:15〜15:35,2:14:00〜17:30', '予備 論文：1日目の刑法・刑訴（13:15〜）が先、2日目の民法・商法・民訴（14:00〜）が後');
+    const ro = SQ.newRun({ exam: 'benri', stage: 'koujutsu', mode: 'road' });
+    check(ro.periods.length === 3 && ro.periods.every(p => p.min === 10 && p.approx), '弁理士 口述：3科目とも各10分程度');
 
     const c = SQ.newRun({ exam: 'cpa', stage: 'tanto', mode: 'road' });
     check(c.periods.map(p => p.id).join(',') === 'kigyo,kanri,kansa,zaimu', '会計士 短答：企業法 → 管理会計論 → 監査論 → 財務会計論');

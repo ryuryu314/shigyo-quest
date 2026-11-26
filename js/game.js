@@ -69,6 +69,8 @@
   const span = sec => { const m = Math.round(sec / 60); return sec < 60 ? '1分未満' : m < 60 ? m + '分' : Math.floor(m / 60) + '時間' + (m % 60 ? m % 60 + '分' : ''); };
   const mmss = sec => { sec = Math.max(0, Math.round(sec)); return Math.floor(sec / 60) + '分' + String(sec % 60).padStart(2, '0') + '秒'; };
   const dur = min => min >= 60 ? Math.floor(min / 60) + '時間' + (min % 60 ? (min % 60) + '分' : '') : min + '分';
+  // 時限の試験時間（「程度」とされているものはそう書く）
+  const durP = p => dur(p.min) + (p.approx ? '程度' : '');
 
   /* ================= 中断した挑戦のカード ================= */
   function suspendedInfo() {
@@ -142,7 +144,7 @@
     if (!s.paper) return '';
     const ps = s.paper.periods.filter(p => p.min || p.time);
     if (!ps.length) return '';
-    return ps.map(p => (p.day ? p.day + '日目 ' : '') + p.name + (p.min ? ' ' + dur(p.min) : '')).join(' → ');
+    return ps.map(p => (p.day ? p.day + '日目 ' : '') + p.name + (p.min ? ' ' + durP(p) : '') + (p.time ? '（' + p.time + '）' : '')).join(' → ');
   }
   function stagePanel(e, s, i, r) {
     const pool = SQ.poolOf(e.id, s.id);
@@ -486,7 +488,7 @@
     const p = perOf(it), pi = it.pno, stage = SQ.stage(run.exam, run.stage), paper = stage.paper, e = SQ.exam(run.exam);
     const its = run.items.filter(x => x.pno === pi);
     const n = its.length, st = paper.style;
-    const time = p.min ? dur(p.min) + (p.time ? '（' + p.time + '）' : '') : '';
+    const time = p.min ? durP(p) + (p.time ? '（' + p.time + '）' : '') : '';
     const sel = p.select ? run.select[p.secs[0]] : 0;
     const notes = [];
     let top = '', title = '', sub = '';
@@ -498,7 +500,7 @@
         notes.push(p.select ? '解答は、画面下のマークシートで、解答欄（［No.1］から）ごとに番号を1つだけマークします。'
           : '解答は、画面下のマークシートで、解答欄（［No.1］から）ごとに番号を1つだけマークします。各記述の正誤に1・2をつける問題は、記述ごとに解答欄があります。');
         if (p.select) notes.push('本番は' + p.select.of + '題から' + p.select.pick + '題を選んで解答します。この模擬は' + n + '題から' + sel + '題。選んだ問題は、選択欄（「選」）と解答欄の両方にマークしてください。選択欄にマークのない解答は採点されません。指定数を超えて選択すると、問題番号の小さい方から' + sel + '題を採点します。');
-        else notes.push('配点は問題ごとに「（配点：2）」のように書かれています。部分点のある問題もありますが、その基準は問題文には書かれません（本アプリは近似で採点します）。');
+        else notes.push('配点は問題ごとに「（配点：2）」のように書かれています。部分点の基準は問題文には書かれませんが、本番の正解及び配点（令和8年）では、各記述の正誤を答える3点の問題は、解答欄3つなら2つ正解で1点、解答欄4つなら3つ正解で2点です。本アプリも同じ基準で採点します。');
         notes.push(free);
         break;
       case 'cpa':
@@ -519,7 +521,7 @@
         top = paper.based + '弁理士試験（模擬・非公式）'; title = paper.book; sub = '';
         notes.push('本番は60題・' + dur(p.min) + 'の5肢択一。問題番号は科目ごとに振られています：' + p.real + '。この模擬では、収録している' + n + '題を出題します。');
         notes.push('各題とも1〜5の中から1つを選び、画面下のマークシートにマークします。1題1点です。');
-        notes.push(free);
+        notes.push(free + '（本番の開始時刻などの時間割は、受験者に別途通知されます）');
         break;
       case 'yobiR':
         top = paper.based + ' 司法試験予備試験（模擬・非公式）'; title = paper.book; sub = '［' + p.name + '］' + (p.day ? ' ' + p.day + '日目' : '');
@@ -534,11 +536,16 @@
         break;
       case 'benriR':
         top = paper.based + '弁理士試験（模擬・非公式）'; title = paper.book; sub = '【' + p.name + '】';
+        notes.push('本番では、試験の際に弁理士試験用法文が貸与されます。');
         notes.push('この模擬では、論点・規範・結論を選んで、答案の骨組みを組み立てます。');
         notes.push(free);
         break;
       default:
         top = e.name + '（模擬・非公式）'; title = '口述試験'; sub = p.name;
+        if (e.id === 'benri') {
+          notes.push('本番は面接方式で、各科目10分程度。受験者が科目ごとの試験室を順に移ります。');
+          notes.push('本番では、試験室にあらかじめ用意された弁理士試験用法文を、試験委員の許可を受けて参照できます（この模擬では条文は表示しません）。');
+        }
         notes.push('試験室に入ると、主査（中央の試験官）が質問し、副査が補足します。この模擬では、答えを選んで口頭の代わりにします。');
         notes.push('答えに詰まると、副査が助け舟を出します（助け舟のあとの正解は半分の評価）。時間制限はありません。');
     }
@@ -549,9 +556,9 @@
       <p class="cvtop">${esc(top)}</p>
       <h2 class="cvtitle">${esc(title)}</h2>
       ${sub ? `<p class="cvsub">${esc(sub)}</p>` : ''}
-      ${total > 1 ? `<p class="cvstep">${pi + 1} / ${total} 時限目${p.day ? ' · ' + p.day + '日目' : ''}</p>` : ''}
+      ${total > 1 ? `<p class="cvstep">${pi + 1} / ${total} ${st === 'oral' ? '科目目' : '時限目'}${p.day ? ' · ' + p.day + '日目' : ''}</p>` : ''}
       <div class="cvbox"><p class="cvh">注　意</p><ol>${notes.map(t => '<li>' + esc(t) + '</li>').join('')}</ol></div>
-      ${p.min ? `<p class="cvtime">試験時間（本番）　${esc(dur(p.min))}${p.time ? '　' + esc(p.time) : ''}</p>` : ''}
+      ${p.min ? `<p class="cvtime">試験時間（本番）　${esc(durP(p))}${p.time ? '　' + esc(p.time) : ''}</p>` : ''}
     </article>`;
   }
 
@@ -648,7 +655,7 @@
       if (road()) {
         if (i < run.curP) { st += ' past'; tag = '提出済み'; } else if (i > run.curP) { st += ' lock'; tag = '未開始'; }
       }
-      return `<button class="${st}" data-act="period" data-p="${i}" ${road() ? 'disabled' : ''}>${esc(p.name)}<small>${p.day ? p.day + '日目 · ' : ''}${p.min ? dur(p.min) + ' · ' : ''}${tag}</small></button>`;
+      return `<button class="${st}" data-act="period" data-p="${i}" ${road() ? 'disabled' : ''}>${esc(p.name)}<small>${p.day ? p.day + '日目 · ' : ''}${p.min ? durP(p) + ' · ' : ''}${tag}</small></button>`;
     }).join('') + '</div>';
   }
   function secnavHtml() {
@@ -1083,7 +1090,7 @@
       const real = p.count ? p.min * 60 / p.count : 0;
       const mine = its.length ? t / its.length : 0;
       const fast = real && mine <= real;
-      return `<tr><td>${esc(p.name)}${p.time ? `<small>${esc(p.time)}</small>` : ''}</td><td><b>${span(t)}</b><small>${its.length}問</small></td><td>${dur(p.min)}${p.count ? `<small>${p.count}問</small>` : ''}</td><td class="${real ? (fast ? 'fast' : 'slow') : ''}">${mine ? mmss(mine) : '—'}${real ? `<small>本番の目安 ${mmss(real)}</small>` : ''}</td></tr>`;
+      return `<tr><td>${esc(p.name)}${p.time ? `<small>${p.day ? p.day + '日目 ' : ''}${esc(p.time)}</small>` : ''}</td><td><b>${span(t)}</b><small>${its.length}問</small></td><td>${durP(p)}${p.count ? `<small>${p.count}問</small>` : ''}</td><td class="${real ? (fast ? 'fast' : 'slow') : ''}">${mine ? mmss(mine) : '—'}${real ? `<small>本番の目安 ${mmss(real)}</small>` : ''}</td></tr>`;
     }).join('');
     return `<div class="sectitle"><h2>時限ごとの時間</h2><span class="muted">制限時間なし · 本番の試験時間と比べる</span></div>
       <div class="panel ttable"><table><thead><tr><th>時限</th><th>かかった時間</th><th>本番</th><th>1問あたり</th></tr></thead><tbody>${rows}</tbody></table></div>`;
