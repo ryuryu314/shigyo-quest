@@ -185,7 +185,8 @@ button.big small { font-size: 11px; font-weight: 500; opacity: .85; }
 .qno b { font-size: 20px; color: var(--ink); }
 .rr .done { font-size: 12px; font-weight: 800; color: var(--dim); white-space: nowrap; }
 .rr { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-left: auto; }
-.get { font-weight: 900; font-size: 12px; letter-spacing: .08em; color: #a86f00; background: #fff6dc; border: 1px solid #f0d08a; padding: 4px 9px; border-radius: 9px; }
+.get { font-weight: 900; font-size: 12px; letter-spacing: .08em; color: #a86f00; background: #fff6dc; border: 1px solid #f0d08a; padding: 4px 9px; border-radius: 9px; white-space: nowrap; }
+.get small { font-size: 10px; margin-left: 1px; }
 .get b { font-size: 16px; font-variant-numeric: tabular-nums; display: inline-block; }
 .combo { font-weight: 900; font-style: italic; letter-spacing: .06em; color: var(--dim); font-size: 12px; white-space: nowrap; }
 .combo b { font-size: 20px; display: inline-block; }
@@ -235,18 +236,25 @@ button.big small { font-size: 11px; font-weight: 500; opacity: .85; }
 .runwrap.enter .lastjudge { animation: lastin .4s cubic-bezier(.2,1.4,.4,1) backwards; }
 @keyframes lastin { from { opacity: 0; transform: translateY(-8px) scale(.97); } }
 
-/* 下に固定したマークシート */
-.markbar { position: sticky; bottom: 0; z-index: 4; margin: 14px -6px 0; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: rgba(255,255,255,.97); border: 1px solid var(--line); border-bottom: 0; border-radius: 18px 18px 0 0; box-shadow: 0 -8px 26px rgba(51,36,94,.08); display: flex; flex-direction: column; gap: 8px; }
-.marks { display: flex; flex-wrap: wrap; gap: 6px 10px; justify-content: center; align-items: center; }
-.mb { width: 46px; height: 46px; min-width: 46px; min-height: 46px; padding: 0; border-radius: 50%; font-size: 18px; font-weight: 900; border: 2px solid #d9d4ea; color: var(--ink2); background: #fff; }
-.mb.on { background: var(--ec); border-color: var(--ec); color: #fff; }
-.mb.right { background: #3fb57a; border-color: #3fb57a; color: #fff; }
-.mb.wrong { background: #f0a35a; border-color: #f0a35a; color: #fff; }
-.mb:disabled { opacity: .4; }
-.mb.on:disabled, .mb.right:disabled, .mb.wrong:disabled { opacity: 1; }
+/* 下に固定した答案用紙（マークシート）。--mk はその試験の答案用紙のインクの色 */
+.markbar { --mk: var(--ec); position: sticky; bottom: 0; z-index: 4; margin: 14px -6px 0; padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); background: rgba(255,255,255,.97); border: 1px solid var(--line); border-bottom: 0; border-radius: 18px 18px 0 0; box-shadow: 0 -8px 26px rgba(51,36,94,.08); display: flex; flex-direction: column; gap: 8px; }
+.msheet { border: 1.5px solid var(--mk); border-radius: 10px; padding: 4px 8px 6px; background: #fffdfb; }
+.mtitle { font-size: 10.5px; font-weight: 800; letter-spacing: .12em; color: var(--mk); text-align: center; line-height: 18px; }
+.marks { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 4px 12px; justify-items: center; align-items: center; }
+.mrow { display: flex; align-items: center; gap: 6px; justify-content: center; }
+.mlab { min-width: 4.2em; display: flex; flex-direction: column; align-items: flex-end; font-size: 12px; font-weight: 900; color: var(--mk); line-height: 1.15; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mlab small { font-size: 10px; font-weight: 700; color: var(--ink2); }
+.mb { width: 34px; height: 44px; min-width: 34px; min-height: 44px; padding: 0; border-radius: 50%; font-size: 15px; font-weight: 800; border: 1.6px solid var(--mk); color: var(--mk); background: #fff; font-variant-numeric: tabular-nums; }
+.mb.on { background: #2a2a33; border-color: #2a2a33; color: #fff; }
+.mb.right { background: #2f9e67; border-color: #2f9e67; color: #fff; }
+.mb.wrong { background: #e0803a; border-color: #e0803a; color: #fff; }
+.mb.key { box-shadow: inset 0 0 0 3px #2f9e67; color: #2f9e67; border-color: #2f9e67; }
+.mb:disabled { opacity: .45; }
+.mb.on:disabled, .mb.right:disabled, .mb.wrong:disabled, .mb.key:disabled { opacity: 1; }
+.mb.selbox { width: 40px; font-size: 13px; }
+.msep { width: 1px; align-self: stretch; background: var(--mk); opacity: .35; margin: 4px 2px; }
 .mgroup { display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px 3px 10px; border-radius: 99px; background: var(--soft); }
 .mgroup b { color: var(--ec); font-size: 15px; margin-right: 2px; }
-.mgroup .mb { width: 40px; height: 40px; min-width: 40px; min-height: 40px; font-size: 16px; }
 .mnav { display: flex; gap: 8px; align-items: center; }
 .mnav button { min-height: 48px; white-space: nowrap; }
 .mnav .primary { flex: 1; font-size: 16px; }
@@ -362,6 +370,103 @@ body.fever .qpanel { border-color: #ff9cc4; border-top-color: #ff3d9a; box-shado
 .sheet .blank { color: #b9b29a; font-size: 13px; }
 .mk { font-weight: 900; flex: 0 0 auto; font-family: var(--ui); }
 .mk.ok { color: #17825e; } .mk.mid { color: #1a6fb8; } .mk.ng { color: #c0392b; }
+
+/* ---------- 本番の問題冊子 ---------- */
+.book { position: relative; margin-top: 12px; padding: 22px 22px 20px; background: #fffefb; color: #141414; border: 1px solid #e4e0d4; border-radius: 4px; box-shadow: 0 1px 0 #efebe0, 0 8px 20px rgba(0,0,0,.035);
+  font-family: var(--mincho); font-size: 15.5px; line-height: 1.95; user-select: text; font-feature-settings: "palt" 0; }
+.book .bh { font-family: var(--ui); font-weight: 800; font-size: 15px; line-height: 1.6; margin-bottom: 4px; letter-spacing: .02em; }
+.book .bh small { font-weight: 700; font-size: 13px; margin-left: .4em; }
+.book .bpts { font-weight: 500; }
+.bsec { font-family: var(--ui); font-weight: 800; font-size: 14px; margin-bottom: 14px; }
+.bsec small { display: block; font-weight: 600; font-size: 11px; color: var(--dim); margin-top: 2px; }
+.bq { margin-bottom: 6px; }
+.bstem { text-indent: 1em; }
+.bstem.en { font-family: "Times New Roman", "Segoe UI", serif; text-indent: 0; }
+.st-shoshi .bq, .st-cpa .bq { display: flex; gap: .9em; align-items: flex-start; }
+.st-shoshi .bstem, .st-cpa .bstem { text-indent: 0; flex: 1; min-width: 0; }
+.bno { font-family: var(--ui); font-weight: 900; flex: 0 0 auto; white-space: nowrap; }
+.qbox { flex: 0 0 auto; font-family: var(--ui); font-weight: 800; font-size: 14px; border: 1.5px solid #141414; padding: 0 .45em; line-height: 1.7; margin-top: .2em; white-space: nowrap; }
+.runhead { display: table; margin: -6px auto 14px; font-family: var(--ui); font-size: 13px; font-weight: 600; border: 1.5px solid #141414; padding: 2px 12px; letter-spacing: .04em; }
+.st-benri .bstem { margin-top: 6px; }
+.bsts { display: grid; gap: 2px; margin: 8px 0 4px; padding-left: 1em; }
+.st-shoshi .bsts, .st-cpa .bsts { padding-left: 3.2em; }
+.st-benri .bsts { padding-left: 0; gap: 12px; margin-top: 14px; }
+.bst { display: flex; gap: .35em; align-items: flex-start; border-radius: 4px; }
+.bl { flex: 0 0 auto; min-width: 1.6em; }
+.st-shoshi .bl { min-width: 2em; }
+.st-benri .bl { min-width: 2.2em; }
+.bt { flex: 1; min-width: 0; }
+.bbox { white-space: nowrap; margin-left: .3em; font-family: var(--ui); font-weight: 600; font-size: .92em; }
+.bres { display: block; font-family: var(--ui); font-size: 12px; font-weight: 800; margin-top: 2px; }
+.bres.ok { color: #17825e; } .bres.ng { color: #c05a00; }
+.bst.ok { background: #f1faf5; } .bst.ng { background: #fff6ee; }
+.bchs { margin: 10px 0 2px; font-variant-numeric: tabular-nums; }
+.bchs.lay-row { display: flex; flex-wrap: wrap; gap: 4px 2.2em; padding-left: 0; }
+.st-shoshi .bchs.lay-row, .st-cpa .bchs.lay-row { padding-left: 3.6em; }
+.bchs.lay-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, max-content)); gap: 2px 2.4em; padding-left: 1em; }
+.bchs.lay-col { display: grid; gap: 4px; padding-left: 1em; }
+.st-benri .bchs.lay-col { padding-left: 0; }
+.bch { display: inline-flex; gap: .3em; align-items: baseline; border-radius: 4px; padding: 0 3px; }
+.bchs.lay-row .bch, .bchs.lay-grid3 .bch { white-space: nowrap; }
+.bch b { font-weight: 500; flex: 0 0 auto; }
+.bch.sel, .bst.sel { background: #f1ecff; box-shadow: inset 0 -2px 0 var(--ec); }
+.bch.key, .bst.key { background: #e8f6ee; box-shadow: inset 0 0 0 1.5px #8fd0ad; }
+.bch.mine, .bst.mine { background: #fff1e4; box-shadow: inset 0 0 0 1.5px #f3c487; }
+.bch.key::after, .bst.key > .bt::after { content: "正解"; font-family: var(--ui); font-size: 10px; font-weight: 800; color: #17825e; margin-left: .5em; }
+.bch.mine::after, .bst.mine > .bt::after { content: "あなた"; font-family: var(--ui); font-size: 10px; font-weight: 800; color: #b56a00; margin-left: .5em; }
+.bcase { margin-top: 4px; }
+.bcase .fl { font-family: var(--ui); color: #141414; font-size: 13px; margin-top: 8px; }
+.bcase .fl:first-child { margin-top: 0; }
+.kind-mcq .easy, .kind-case .easy { margin-top: 8px; }
+.qpanel.covering { padding: 18px; }
+
+/* 表紙（時限の始めの注意事項） */
+.cover { text-align: center; padding: 30px 26px 26px; }
+.cvtop { font-size: 13px; color: #555; letter-spacing: .06em; }
+.cvtitle { font-family: var(--mincho); font-size: 30px; letter-spacing: .3em; margin: 12px 0 4px; font-weight: 600; }
+.cvsub { font-family: var(--mincho); font-size: 21px; letter-spacing: .12em; }
+.cvstep { display: inline-block; margin-top: 10px; font-family: var(--ui); font-size: 12px; font-weight: 800; color: var(--ec); background: var(--et); padding: 3px 12px; border-radius: 99px; }
+.cvbox { text-align: left; border: 1.5px solid #141414; margin: 20px auto 0; max-width: 640px; padding: 12px 18px 14px; }
+.cvh { text-align: center; font-family: var(--ui); font-weight: 800; letter-spacing: .5em; margin-bottom: 6px; }
+.cvbox ol { list-style: none; counter-reset: cv; display: grid; gap: 6px; }
+.cvbox li { counter-increment: cv; position: relative; padding-left: 2.2em; font-size: 14.5px; line-height: 1.85; }
+.cvbox li::before { content: "(" counter(cv) ")"; position: absolute; left: 0; font-family: var(--ui); font-size: 13px; }
+.cvtime { margin-top: 14px; font-family: var(--ui); font-weight: 800; font-size: 14px; }
+
+/* 時限の切り替え */
+.pnav { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 2px; }
+.pnav button { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; font-size: 12.5px; font-weight: 800; padding: 7px 12px; min-height: 44px; text-align: left; }
+.pnav button small { font-size: 10.5px; font-weight: 600; opacity: .8; }
+.pnav button.on { background: var(--ec); border-color: var(--ec); color: #fff; opacity: 1; }
+.pnav button.past { background: #eef6f1; border-color: #b9dcc8; color: #2b6e4b; }
+.pnav button.lock { background: #f4f4f7; color: #9a9cb0; }
+.pnav button:disabled { opacity: 1; cursor: default; }
+.qc.picked { box-shadow: inset 0 -3px 0 var(--ec); }
+
+/* 司法書士 記述式の答案用紙（欄ごとの表） */
+.ansgrid { margin-top: 18px; border: 2px double #7a7a7a; padding: 8px 10px 10px; background: #fff; font-family: var(--mincho); }
+.ansgrid table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ansgrid th { width: 9.5em; text-align: left; vertical-align: top; font-family: var(--ui); font-size: 12px; font-weight: 700; border: 1px solid #555; padding: 7px 8px; background: #fafafa; line-height: 1.5; }
+.ansgrid th small { display: block; font-size: 10.5px; color: var(--dim); font-weight: 600; }
+.ansgrid td { border: 1px solid #555; padding: 7px 10px; line-height: 1.8; min-height: 2.2em; white-space: pre-wrap; }
+.ansgrid tr.todo td { background: repeating-linear-gradient(-45deg, #fff 0 6px, #f6f6f6 6px 7px); }
+.sym { display: inline-block; min-width: 1.6em; font-family: var(--mincho); font-weight: 700; color: var(--ec); }
+.sheet.cbt { background: repeating-linear-gradient(#fff 0 33px, #e3e7ef 33px 34px); border-color: #cdd5e3; font-family: var(--ui); }
+.sheet.cbt .paperhead { color: #6d7b96; }
+
+/* 結果：時限ごとの時間 */
+.ttable { padding: 6px 4px; overflow-x: auto; }
+.ttable table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ttable th { font-size: 11px; color: var(--dim); text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.ttable td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; line-height: 1.5; }
+.ttable tr:last-child td { border-bottom: 0; }
+.ttable td small { display: block; font-size: 11px; color: var(--dim); }
+.ttable td.fast { color: #17825e; font-weight: 800; }
+.ttable td.slow { color: #c05a00; font-weight: 800; }
+.scorehint { font-size: 11px; color: var(--dim); margin-top: -2px; }
+.peek.off { background: #f1f1f5; color: #8a8ca0; }
+.timeline { color: var(--ink2); }
+.timeline b { color: var(--ec); margin-right: 4px; }
 
 /* 口述 */
 .oral { display: flex; flex-direction: column; gap: 12px; }
@@ -553,11 +658,30 @@ body.fever .qpanel { border-color: #ff9cc4; border-top-color: #ff3d9a; box-shado
   .choices.short { grid-template-columns: 1fr 1fr; }
   .qactions { justify-content: stretch; }
   .qactions button { flex: 1 1 auto; }
-  .markbar { margin: 12px -14px 0; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); gap: 7px; }
-  .marks { gap: 5px 6px; }
-  .mb { width: 44px; height: 44px; min-width: 44px; min-height: 44px; font-size: 17px; }
-  .mgroup { padding: 2px 4px 2px 8px; gap: 3px; }
-  .mgroup .mb { width: 38px; height: 38px; min-width: 38px; min-height: 38px; }
+  .markbar { margin: 12px -14px 0; padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); gap: 6px; }
+  .msheet { padding: 2px 4px 4px; }
+  .marks { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 2px 6px; }
+  .mrow { gap: 4px; }
+  .mlab { min-width: 3.6em; font-size: 11px; }
+  .mb { width: 32px; height: 42px; min-width: 32px; min-height: 42px; font-size: 14px; }
+  .mb.selbox { width: 34px; font-size: 12px; }
+  .book { padding: 16px 13px 14px; font-size: 15px; line-height: 1.9; }
+  .st-shoshi .bsts, .st-cpa .bsts { padding-left: 1em; }
+  .st-shoshi .bchs.lay-row, .st-cpa .bchs.lay-row { padding-left: 1em; }
+  .bchs.lay-row { gap: 4px 1.4em; }
+  .bchs.lay-grid3 { grid-template-columns: repeat(2, minmax(0, max-content)); gap: 2px 1.6em; }
+  .cover { padding: 22px 14px 18px; }
+  .cvtitle { font-size: 24px; letter-spacing: .18em; }
+  .cvsub { font-size: 17px; }
+  .cvbox { padding: 10px 12px 12px; }
+  .cvbox li { font-size: 13.5px; }
+  .ansgrid th { width: 7.2em; font-size: 11px; padding: 6px; }
+  .ansgrid td { padding: 6px 8px; font-size: 13px; }
+  .pnav button { font-size: 12px; padding: 6px 10px; }
+  .rr { gap: 8px; }
+  .rr .done { display: none; }
+  .rr button.small { white-space: nowrap; padding: 6px 10px; }
+  .qno { font-size: 12px; }
   .mnav { gap: 6px; }
   .mnav button { padding: 8px 10px; font-size: 13px; }
   .mnav .primary { font-size: 15px; }

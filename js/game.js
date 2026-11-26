@@ -1,13 +1,18 @@
 /* 士業ドパミンクエスト — 画面と進行
  * 画面: home / exam（本試験ロード）/ run（挑戦中）/ result / records。設定・使い方・一時停止はモーダル。
  * 簿記ドパミンクエストの本番模試モードに合わせる:
- *   - 制限時間・カウントダウンはない。かかった時間（止まっている間は数えない）を結果に出す
- *   - 「解答を見る」で、問題の隣（スマホは問題の下）に解答を出したままにする。見た問題は記録に入れない
+ *   - 制限時間・カウントダウンはない。かかった時間（止まっている間は数えない）を、時限ごとに本番の試験時間と比べて結果に出す
+ *   - 「解答を見る」で、問題の隣（スマホは問題の下）に解答を出す。開いたら「解答を閉じる」まで次の問題以降も出したまま
+ *     （開閉はこのブラウザが覚える）。見た問題は記録に入れない
  *   - 「かんたんに言うと」はいつも表示
  *   - 2分間操作がなければ一時停止。中断した挑戦はこのブラウザに保存して、ホームから続きを解ける
  *   - 下に固定したマークシートで、スクロールせずに解答して次の問題へ
+ * 本番の形式（data/exams.js の paper）:
+ *   - 問題は本番の問題冊子の書き方で出す（〔第1問〕（配点：2）と［No.1］／問題1（5点）／第1問／【特許・実用新案】1）
+ *   - 本試験モードは時限ごとに表紙（注意事項・試験時間）から始め、次の時限へ進むと前の時限の答案は回収済みになる
+ *   - 予備試験の一般教養は、選択欄と解答欄の両方にマークする。指定数を超えたら問題番号の小さい方から採点
  * 本試験モード: 「次へ進む」で答え合わせして次へ。結果でロードが進む。
- * 練習モード  : 1問ごとに解説。ロードは進まない。
+ * 練習モード  : 1問ごとに解説。ロードは進まない。表紙は出さず、時限の間も自由に行き来できる。
  */
 (function () {
   'use strict';
@@ -55,13 +60,15 @@
   }
   function foot() {
     return `<footer class="foot">
-      <p>本アプリは非公式の学習用ゲームです。法務省・公認会計士・監査審査会・特許庁など、試験の実施機関とは関係ありません。問題はすべて独自に作成したもので、2026年11月時点の法令・基準をもとにしていますが、正確さや最新性は保証しません。配点・合格点は公表資料をもとにした目安で、本番の採点を再現するものではありません。受験の際は必ず公式の情報を確認してください。</p>
+      <p>本アプリは非公式の学習用ゲームです。法務省・公認会計士・監査審査会・特許庁など、試験の実施機関とは関係ありません。問題はすべて独自に作成したもので、2026年11月時点の法令・基準をもとにしていますが、正確さや最新性は保証しません。問題冊子・答案用紙の書き方や時間割は公表資料をもとに再現していますが、本物の様式ではありません。配点・合格点は公表資料をもとにした目安で、本番の採点を再現するものではありません。受験の際は必ず公式の情報を確認してください。</p>
       <p>外部通信・広告なし。記録はこのブラウザの中だけに保存されます（設定から書き出せます）。</p>
     </footer>`;
   }
   const daysUntil = d => { const t = new Date(d + 'T00:00:00'), n = new Date(); n.setHours(0, 0, 0, 0); return Math.round((t - n) / 86400000); };
   const fmtPts = v => (Math.round(v * 10) / 10).toLocaleString('ja-JP', { maximumFractionDigits: 1 });
   const span = sec => { const m = Math.round(sec / 60); return sec < 60 ? '1分未満' : m < 60 ? m + '分' : Math.floor(m / 60) + '時間' + (m % 60 ? m % 60 + '分' : ''); };
+  const mmss = sec => { sec = Math.max(0, Math.round(sec)); return Math.floor(sec / 60) + '分' + String(sec % 60).padStart(2, '0') + '秒'; };
+  const dur = min => min >= 60 ? Math.floor(min / 60) + '時間' + (min % 60 ? (min % 60) + '分' : '') : min + '分';
 
   /* ================= 中断した挑戦のカード ================= */
   function suspendedInfo() {
@@ -104,7 +111,7 @@
         <div>
           <p class="kicker">STUDY · STAGE · PASS</p>
           <h1>本番の流れで、<br><em>一段ずつ</em>合格へ。</h1>
-          <p class="sub">予備試験・公認会計士・司法書士・弁理士。短答から口述まで、本試験の段階をそのままステージにした練習ゲーム · 非公式</p>
+          <p class="sub">予備試験・公認会計士・司法書士・弁理士。短答から口述まで、本試験の段階・時間割・問題冊子の書き方をそのままステージにした練習ゲーム · 非公式</p>
         </div>
         <div class="panel lvcard">
           <div class="lvtop">
@@ -131,22 +138,30 @@
   }
 
   /* ================= 本試験ロード（試験ごとの画面） ================= */
+  function periodLine(s) {
+    if (!s.paper) return '';
+    const ps = s.paper.periods.filter(p => p.min || p.time);
+    if (!ps.length) return '';
+    return ps.map(p => (p.day ? p.day + '日目 ' : '') + p.name + (p.min ? ' ' + dur(p.min) : '')).join(' → ');
+  }
   function stagePanel(e, s, i, r) {
     const pool = SQ.poolOf(e.id, s.id);
     const chips = s.sections.map(sec => {
       const n = SQ.poolOf(e.id, s.id, sec.id).length;
       const pts = s.kind === 'oral' ? '' : ' <b>' + sec.points + '</b>';
-      return `<span class="chip ${n ? '' : 'off'}">${esc(sec.name)}${pts}${n ? ' <i>' + n + '問</i>' : ' <i>準備中</i>'}</span>`;
+      return `<span class="chip ${n ? '' : 'off'}">${esc(sec.name)}${pts}${n ? ' <i>' + n + '問' + (sec.n ? '/本番' + sec.n : '') + '</i>' : ' <i>準備中</i>'}</span>`;
     }).join('');
     const best = S.best[e.id + '.' + s.id];
     const state = stageState(e, r, i);
     const label = { done: '突破', ex: '免除中', now: '挑戦中', lock: '未到達' }[state];
+    const pl = periodLine(s);
     return `<div class="panel stage ${state}" style="--ec:${e.color};--et:${e.tint}">
       <div class="sthead"><span class="sno">STAGE ${i + 1}</span><h3>${esc(s.name)}</h3><span class="when">${esc(s.when)}</span><span class="stbadge ${state}">${label}</span></div>
       <p class="lead">${esc(s.lead)}</p>
       <div class="chips">${chips}</div>
+      ${pl ? `<p class="mini timeline"><b>時間割</b> ${esc(pl)}</p>` : ''}
       <p class="rule"><b>合格ライン</b> ${esc(s.rule.label)}</p>
-      <p class="mini">収録 ${pool.length}問 · 時間制限なし${best ? ' · ベスト ' + Math.round(best.ratio * 100) + '%' + (best.pass ? '（合格判定）' : '') : ''}</p>
+      <p class="mini">収録 ${pool.length}問 · 時間制限なし（本番の時間と比べて表示）${best ? ' · ベスト ' + Math.round(best.ratio * 100) + '%' + (best.pass ? '（合格判定）' : '') : ''}</p>
       <details class="facts"><summary>本番データ</summary><ul>${s.facts.map(f => '<li>' + esc(f) + '</li>').join('')}</ul></details>
       <div class="actions"><button data-act="practice" data-exam="${e.id}" data-stage="${s.id}" ${pool.length ? '' : 'disabled'}>練習モード（解説つき）</button></div>
     </div>`;
@@ -182,11 +197,11 @@
         <p class="sub">${esc(e.goal)}</p>
         <div class="roadline">${nodes}</div>
         <p class="roadstat">第${r.year}回目の挑戦${r.wins ? ' · これまでの合格 ' + r.wins + '回' : ''}${ex ? ' · ' + esc(ex) : ''}</p>
-        <button class="primary big" data-act="road" data-exam="${e.id}">▶ STAGE ${r.stage + 1}「${esc(cur.name)}」に挑む<small>本試験モード · 時間制限なし · 結果でロードが進む</small></button>
+        <button class="primary big" data-act="road" data-exam="${e.id}">▶ STAGE ${r.stage + 1}「${esc(cur.name)}」に挑む<small>本試験モード · 時限ごとに表紙から · 時間制限なし · 結果でロードが進む</small></button>
         <div class="target"><label>受験予定日 <input type="date" data-act="target" data-exam="${e.id}" value="${esc(target)}"></label>
           <span class="${dd != null && dd >= 0 && dd <= 30 ? 'soon' : ''}">${dd == null ? '日付を入れると、本番までの日数を出します' : dd > 0 ? '本番まで あと <b>' + dd + '</b> 日' : dd === 0 ? '<b>本番当日</b>' : '予定日を過ぎています'}</span></div>
       </section>
-      <div class="sectitle"><h2>ステージ</h2><span class="muted">本番の段階・配点・合格ラインを再現</span></div>
+      <div class="sectitle"><h2>ステージ</h2><span class="muted">本番の段階・時間割・配点・合格ラインを再現</span></div>
       <div class="stages">${e.stages.map((s, i) => stagePanel(e, s, i, r)).join('')}</div>
       <div class="sectitle"><h2>挑戦の記録</h2></div>
       <div class="panel">${roadLog(e, r)}</div>
@@ -196,70 +211,107 @@
 
   /* ================= 挑戦中 ================= */
   const cur = () => run.items[run.idx];
-  const FORM = { one: '5肢択一', combo: '組合せ', count: '個数問題', pick: '計算', tf: '各肢の正誤' };
+  const FORM = { one: '5肢択一', combo: '組合せ', count: '個数問題', pick: '計算・選択', tf: '各記述の正誤', ox: '○×の組合せ' };
   const diamonds = lv => '◆'.repeat(lv || 1);
   const road = () => run.mode === 'road';
   const isLast = () => run.idx === run.items.length - 1;
+  const hasP = () => run.periods.length > 0;
+  const perOf = it => run.periods[it.pno] || null;
+  // 本試験モードで、まだ表紙（注意事項）を閉じていない時限
+  const covering = it => road() && hasP() && !run.opened[it.pno];
+  // 本試験モードでは、今の時限の問題だけ解答できる（前の時限は回収済み）
+  const editable = it => !it.done && !(road() && hasP() && it.pno !== run.curP);
   function runTitle() { return run.stage ? SQ.exam(run.exam).short + ' · ' + SQ.stage(run.exam, run.stage).name : run.label; }
   function comboTier() { return run.combo >= 10 ? 3 : run.combo >= 5 ? 2 : run.combo >= 3 ? 1 : 0; }
   function tagOf(q, kindName) {
     const sec = SQ.secOf(q);
     const ex = run.stage ? '' : SQ.exam(q.exam).short + ' · ';
-    return ex + [q.subj || (sec ? sec.name : ''), kindName, diamonds(q.lv)].filter(Boolean).join(' · ');
+    return ex + [q.subj || (sec ? sec.name : ''), kindName, diamonds(q.lv), q.title].filter(Boolean).join(' · ');
   }
   const easyBox = q => `<div class="easy"><p class="eh">🔰 かんたんに言うと</p><p>${esc(SQ.easyOf(q))}</p></div>`;
-
-  function scrRun() {
-    const it = cur(), e = SQ.exam(it.q.exam);
-    const docked = it.revealed && it.dock && !it.done;
-    const chips = run.items.map((s, i) => {
-      let c = i === run.idx ? 'cur ' : '';
-      if (s.done) c += s.score >= 0.999 ? 'ok' : s.score > 0 ? 'mid' : 'ng';
-      else if (s.flag) c += 'flag';
-      return `<button class="qc ${c}" data-act="nav" data-i="${i}" aria-label="問${i + 1}">${i + 1}</button>`;
-    }).join('');
-    let secnav = '';
-    if (run.stage) {
-      const stage = SQ.stage(run.exam, run.stage);
-      secnav = '<div class="secnav">' + stage.sections.map(sec => {
-        const its = run.items.map((s, i) => [s, i]).filter(([s]) => s.q.sec === sec.id);
-        if (!its.length) return '';
-        const done = its.filter(([s]) => s.done).length;
-        return `<button class="${it.q.sec === sec.id ? 'on' : ''}" data-act="nav" data-i="${its[0][1]}">${esc(sec.name)} <small>${stage.kind === 'oral' ? '' : sec.points + '点 '}${done}/${its.length}</small></button>`;
-      }).join('') + '</div>';
+  // 本番の冊子での呼び方（前の問題の正誤・解答番号の見出しに使う）
+  function qLabel(it) {
+    if (!run.stage) return 'Q' + (run.items.indexOf(it) + 1);
+    const sec = SQ.secOf(it.q);
+    switch (SQ.styleOf(it.q)) {
+      case 'yobi': return '〔第' + it.no + '問〕';
+      case 'shoshi': return '第' + it.no + '問';
+      case 'cpa': return '問題' + it.no;
+      case 'benri': return '【' + sec.name + '】' + it.no;
+      default: return sec ? sec.name : 'Q' + (run.items.indexOf(it) + 1);
     }
-    const answered = run.items.filter(s => s.done).length;
-    return `<div class="shell runshell ${run.mode}"><div class="wrap runwrap ${docked ? 'docked' : ''}">
-      <div class="runhdr">
-        <div class="rl"><b>${esc(runTitle())}</b><small>${road() ? '本試験モード ·「次へ進む」で答え合わせ' : '練習モード · 1問ごとに解説'}</small></div>
-        <div class="rr"><span class="qno">Q <b>${run.idx + 1}</b>/${run.items.length}</span><span class="done">解答 ${answered}</span><span class="get">GET <b id="get">${fmtPts(run.get)}</b></span><span class="combo" id="combo" data-tier="${comboTier()}">COMBO <b>${run.combo}</b></span><button class="small" data-act="pause">中断</button></div>
-      </div>
-      ${secnav}
-      <div class="qnav">${chips}</div>
-      ${lastJudgeHtml()}
-      <div class="quizgrid ${docked ? 'docked' : ''}">
-        <section class="qpanel kind-${it.q.kind}" id="qpanel" style="--ec:${e.color};--et:${e.tint}">${itemHtml(it)}</section>
-        ${docked ? `<aside class="dock" id="dock" style="--ec:${e.color};--et:${e.tint}">${dockHtml(it)}</aside>` : ''}
-      </div>
-      <div class="markbar" id="markbar" style="--ec:${e.color};--et:${e.tint}">${markbarHtml(it)}</div>
-    </div></div>`;
-  }
-  function itemHtml(it) {
-    if (it.q.kind === 'case') return caseHtml(it);
-    if (it.q.kind === 'oral') return oralHtml(it);
-    return mcqHtml(it);
   }
 
-  /* ---------- 直前の問題の正誤（本試験モード） ---------- */
+  /* ---------- 問題冊子の書き方 ---------- */
+  const zen1 = n => SQ.zen1(String(n));
+  // 法務省の冊子：本文の数字は全角（「第２１条」「３０日」「刑集４９巻１０号８４２頁」）。数字の間の「,」「.」と「%」も全角にそろえる
+  const mojDigits = s => SQ.zenAll(String(s).replace(/([0-9])([,.])(?=[0-9])/g, (m, d, p) => d + (p === ',' ? '，' : '．')).replace(/%/g, '％'));
+  function bt(s, q) {
+    const st = SQ.styleOf(q);
+    let t = String(s == null ? '' : s);
+    if ((st === 'yobi' && q.sec !== 'kyoyo') || st === 'shoshi') t = mojDigits(t);
+    else if (st === 'benri') t = SQ.zen1(t);
+    else if (st === 'cpa') t = t.replace(/、/g, '，');
+    return esc(t).replace(/\n/g, '<br>');
+  }
+  function boxRef(it) {
+    const b = it.boxes;
+    if (it.q.form === 'tf') {
+      const L = it.q.st.map(s => s[0]);
+      return `（解答欄は、${L[0]}から${L[L.length - 1]}の順に［No.${zen1(b[0])}］から［No.${zen1(b[b.length - 1])}］）`;
+    }
+    return `（解答欄は、［No.${zen1(b[0])}］）`;
+  }
+  function stemHtml(it) {
+    const q = it.q, st = SQ.styleOf(q);
+    let t = bt(q.q, q);
+    if (st === 'shoshi') t = t.replace(/((?:判例の趣旨に照らし)?(?:正しいもの|誤っているもの))/, '<b>$1</b>');
+    if (st === 'yobi' && run.stage) t += boxRef(it);
+    if (st === 'cpa') t += '（' + it.pts + '点）';
+    return t;
+  }
+  function bookHead(it) {
+    const q = it.q, sec = SQ.secOf(q);
+    switch (SQ.styleOf(q)) {
+      case 'yobi': return `<p class="bh">〔第${zen1(it.no)}問〕${q.sec === 'kyoyo' ? '' : `<span class="bpts">（配点：${zen1(it.pts)}）</span>`}</p>`;
+      case 'cpa': return `<span class="qbox">問題${it.no}</span>`;
+      case 'shoshi': return q.kind === 'case' ? `<p class="bh">第${zen1(it.no)}問<small>（${esc(q.subj || sec.name)}）</small></p>` : `<b class="bno">第${zen1(it.no)}問</b>`;
+      case 'benri': return `<p class="bh">【${esc(sec.name)}】 ${zen1(it.no)}</p>`;
+      case 'yobiR': case 'cpaR': return `<p class="bh">［${esc(sec.name)}］</p>`;
+      case 'benriR': return `<p class="bh">【${esc(sec.name)}】</p>`;
+      default: return '';
+    }
+  }
+  // 予備試験の冊子は、科目の始まりに［民法］のような見出しがある
+  function secLabel(it) {
+    if (!run.stage || SQ.styleOf(it.q) !== 'yobi') return '';
+    const i = run.items.indexOf(it);
+    const first = run.items.findIndex(x => x.pno === it.pno && x.q.sec === it.q.sec);
+    if (first !== i) return '';
+    const sec = SQ.secOf(it.q), p = perOf(it);
+    if (it.q.sec === 'kyoyo' && p && p.select) return `<p class="bsec">［一般教養科目］（${p.select.of}問中${p.select.pick}問選択：1問につき3点、60点満点）<small>この模擬は${run.items.filter(x => x.q.sec === 'kyoyo').length}問中${run.select.kyoyo}問選択</small></p>`;
+    return `<p class="bsec">［${esc(sec.name)}］</p>`;
+  }
+  function stLabel(st, form, label, i) {
+    if (form === 'one') return st === 'cpa' ? (i + 1) + '.' : SQ.zenAll(i + 1) + (st === 'yobi' ? '．' : '');
+    if (st === 'shoshi') return label;
+    if (st === 'benri') return '（' + String(label).replace(/[()（）]/g, '') + '）';
+    return label + '．';
+  }
+  const chLabel = (st, no) => st === 'cpa' ? no + '.' : SQ.zenAll(no) + (st === 'yobi' ? '．' : '');
+
+  /* ---------- 前の問題の正誤（本試験モード） ---------- */
   function lastJudgeHtml() {
     const j = run.lastJudge;
     if (!road() || !j || j.idx !== run.idx - 1) return '';
     const cls = j.score >= 0.999 ? 'ok' : j.score > 0 ? 'part' : 'ng';
     const what = j.kind === 'mcq' ? '' : j.kind === 'case' ? ' 答案' : ' 口述';
-    const head = cls === 'ok' ? `◎ Q${j.idx + 1}${what} 正解${j.kind === 'mcq' ? ' <small>+' + fmtPts(j.got) + '点</small>' : ''}`
-      : cls === 'part' ? `△ Q${j.idx + 1}${what} ${j.kind === 'mcq' ? '部分点 <small>+' + fmtPts(j.got) + ' / ' + fmtPts(j.pts) + '点</small>' : Math.round(j.score * 100) + '%'}`
-        : `✕ Q${j.idx + 1}${what} ${j.kind === 'mcq' ? '不正解' : '0%'}`;
-    return `<div class="lastjudge ${cls}" role="status"><b>${head}</b>${cls !== 'ok' && j.ans ? `<span class="lastans">正解 ▸ ${esc(j.ans)}</span>` : ''}<button class="small" data-act="nav" data-i="${j.idx}">解説を見る</button></div>`;
+    const lab = esc(j.label || 'Q' + (j.idx + 1));
+    const head = cls === 'ok' ? `◎ ${lab}${what} 正解${j.kind === 'mcq' ? ' <small>+' + fmtPts(j.got) + '点</small>' : ''}`
+      : cls === 'part' ? `△ ${lab}${what} ${j.kind === 'mcq' ? '部分点 <small>+' + fmtPts(j.got) + ' / ' + fmtPts(j.pts) + '点</small>' : Math.round(j.score * 100) + '%'}`
+        : `✕ ${lab}${what} ${j.kind === 'mcq' ? '不正解' : '0%'}`;
+    const note = j.unsel ? '<span class="lastans">選択欄にマークがないので、本番ではこの解答は採点されません。</span>' : '';
+    return `<div class="lastjudge ${cls}" role="status"><b>${head}</b>${cls !== 'ok' && j.ans ? `<span class="lastans">正解 ▸ ${esc(j.ans)}</span>` : ''}${note}<button class="small" data-act="nav" data-i="${j.idx}">解説を見る</button></div>`;
   }
   function answerText(q) {
     if (q.kind !== 'mcq') return '';
@@ -268,34 +320,46 @@
     return c.no + '　' + c.text;
   }
 
-  /* ---------- 択一 ---------- */
+  /* ---------- 択一（問題冊子） ---------- */
   function canCommit(it) {
     if (it.q.form === 'tf') return Array.isArray(it.ans) && it.q.st.every((s, i) => typeof it.ans[i] === 'boolean');
     return it.ans != null;
   }
   function mcqHtml(it) {
-    const q = it.q, key = SQ.mcqKey(q), done = it.done;
+    const q = it.q, st = SQ.styleOf(q), key = SQ.mcqKey(q), done = it.done;
+    const showSel = !road(); // 本番の冊子に自分のマークは出ない。練習モードだけ目印をつける
     let body = '';
     if (q.form === 'tf') {
-      body = '<ol class="stl tf">' + q.st.map((s, i) => {
+      body = '<ol class="bsts">' + q.st.map((s, i) => {
         const a = it.ans ? it.ans[i] : undefined;
         const res = done ? (a === s[2] ? 'ok' : 'ng') : '';
-        return `<li class="${res}"><div class="sttext"><b>${esc(s[0])}</b><span>${esc(s[1])}</span></div>
-          <div class="tfbtns"><button class="tfb ${a === true ? 'on' : ''}" data-act="tf" data-i="${i}" data-v="1" ${done ? 'disabled' : ''}>1 正しい</button><button class="tfb ${a === false ? 'on' : ''}" data-act="tf" data-i="${i}" data-v="0" ${done ? 'disabled' : ''}>2 誤り</button></div>
-          ${done ? `<p class="stnote"><b>${s[2] ? '正しい' : '誤り'}</b>　${esc(s[3] || '')}</p>` : ''}</li>`;
+        const no = st === 'yobi' && run.stage ? `<span class="bbox">［No.${zen1(it.boxes[i])}］</span>` : '';
+        const mark = done ? `<span class="bres ${res}">${res === 'ok' ? '◯' : '✕'} あなた ${a === true ? '1' : a === false ? '2' : '－'} ／ 正解 ${s[2] ? '1' : '2'}</span>` : '';
+        return `<li class="bst ${res}"><span class="bl">${esc(stLabel(st, 'tf', s[0], i))}</span><span class="bt">${bt(s[1], q)}${no}${mark}</span></li>`;
+      }).join('') + '</ol>';
+    } else if (q.form === 'one') {
+      body = '<ol class="bsts one">' + q.st.map((s, i) => {
+        const cls = done ? (i === key.answer ? 'key' : it.ans === i ? 'mine' : '') : (showSel && it.ans === i ? 'sel' : '');
+        return `<li class="bst ${cls}"><span class="bl">${esc(stLabel(st, 'one', s[0], i))}</span><span class="bt">${bt(s[1], q)}</span></li>`;
       }).join('') + '</ol>';
     } else {
-      if (q.form === 'combo' || q.form === 'count') body += '<ol class="stl">' + q.st.map(s => `<li><div class="sttext"><b>${esc(s[0])}</b><span>${esc(s[1])}</span></div></li>`).join('') + '</ol>';
-      body += `<div class="choices ${q.form === 'one' ? 'long' : 'short'}">` + key.choices.map((c, i) => {
-        let cls = it.ans === i ? 'sel' : '';
-        if (done) cls += i === key.answer ? ' right' : it.ans === i ? ' wrong' : '';
-        return `<button class="choice ${cls}" data-act="pick" data-i="${i}" ${done ? 'disabled' : ''}><b>${c.no}</b><span>${esc(c.text)}</span></button>`;
+      if (q.st && q.form !== 'pick') body += '<ol class="bsts">' + q.st.map((s, i) => `<li class="bst"><span class="bl">${esc(stLabel(st, q.form, s[0], i))}</span><span class="bt">${bt(s[1], q)}</span></li>`).join('') + '</ol>';
+      const longest = Math.max.apply(null, key.choices.map(c => String(c.text).length));
+      const layout = (q.form === 'count' && st === 'benri') || longest > 16 ? 'lay-col' : (q.form === 'ox' || q.form === 'pick') ? 'lay-grid3' : 'lay-row';
+      body += `<div class="bchs ${layout}">` + key.choices.map((c, i) => {
+        const cls = done ? (i === key.answer ? 'key' : it.ans === i ? 'mine' : '') : (showSel && it.ans === i ? 'sel' : '');
+        const text = q.form === 'combo' && st !== 'yobi' ? String(c.text).replace(/\s+/g, '') : c.text;
+        return `<span class="bch ${cls}"><b>${esc(chLabel(st, c.no))}</b><span>${bt(text, q)}</span></span>`;
       }).join('') + '</div>';
     }
-    return `<p class="qtag">${esc(tagOf(q, FORM[q.form]))}</p><h3 class="qtitle">${esc(q.title)}</h3>
-      <p class="qtext ${q.en ? 'en' : ''}">${esc(q.q)}</p>
+    return `<p class="qtag">${esc(tagOf(q, FORM[q.form]))}</p>
       ${easyBox(q)}
-      ${body}
+      <article class="book st-${st || 'none'}">
+        ${st === 'cpa' && run.stage ? `<span class="runhead">短答式${esc(SQ.secOf(q).name)}</span>` : ''}
+        ${secLabel(it)}
+        <div class="bq">${bookHead(it)}<p class="bstem ${q.en ? 'en' : ''}">${stemHtml(it)}</p></div>
+        ${body}
+      </article>
       <div class="fbhost" id="fb">${done ? feedbackMcq(it) : ''}</div>`;
   }
   function mcqKeyHtml(q) {
@@ -307,12 +371,18 @@
   }
   function feedbackMcq(it) {
     const ok = it.score >= 0.999, mid = !ok && it.score > 0;
-    return `<div class="feedback ${ok ? '' : 'wrong'}"><h4>${ok ? '正解！' : mid ? '惜しい！ 部分点' : '伸びしろ発見'}</h4>${mcqKeyHtml(it.q)}</div>`;
+    return `<div class="feedback ${ok ? '' : 'wrong'}"><h4>${ok ? '正解！' : mid ? '惜しい！ 部分点' : '伸びしろ発見'}${run.stage ? ` <small>${fmtPts(it.score * it.pts)} / ${fmtPts(it.pts)}点</small>` : ''}</h4>${mcqKeyHtml(it.q)}</div>`;
   }
 
   /* ---------- 論文・記述 ---------- */
-  function sheetLine(s, a) {
-    if (s.type === 'multi') return (a || []).map(i => s.options[i][0]).join('／') || '（なし）';
+  const SYM = 'アイウエオカキクケコサシスセソタチツテト';
+  function sheetLine(s, a, st) {
+    if (s.type === 'multi') {
+      const picked = (a || []).slice().sort((x, y) => x - y);
+      if (!picked.length) return '（なし）';
+      // 司法書士の添付情報は【添付情報一覧】の記号で答える
+      return st === 'shoshi' ? picked.map(i => SYM[i]).join('　') : picked.map(i => s.options[i][0]).join('／');
+    }
     return a != null ? s.options[a][0] : '';
   }
   const markOf = sc => sc == null ? '' : `<span class="mk ${sc >= 0.999 ? 'ok' : sc > 0 ? 'mid' : 'ng'}">${sc >= 0.999 ? '◯' : sc > 0 ? '△' : '✕'}</span>`;
@@ -320,35 +390,52 @@
     const s = it.q.steps[it.step], a = it.stepAns[it.step];
     return s.type === 'multi' ? Array.isArray(a) && a.length > 0 : a != null;
   }
+  function sheetHtml(it) {
+    const q = it.q, st = SQ.styleOf(q);
+    const reviewing = it.stepView === 'review';
+    const upto = it.done ? q.steps.length : it.step + (reviewing ? 1 : 0);
+    if (st === 'shoshi') {
+      // 司法書士の記述式：欄ごとの表（登記の目的／申請事項等／添付情報／登録免許税）
+      const rows = q.steps.map((s, i) => `<tr class="${i < upto ? '' : 'todo'}"><th>${esc(s.row || s.label)}${s.row ? `<small>${esc(s.label)}</small>` : ''}</th><td>${i < upto ? esc(sheetLine(s, it.stepAns[i], st)) + ' ' + markOf(it.stepScore[i]) : ''}</td></tr>`).join('');
+      return `<div class="ansgrid"><p class="paperhead">第${it.no}問答案用紙　第1欄</p><table>${rows}</table></div>`;
+    }
+    const lines = q.steps.slice(0, upto).map((s, i) => `<p><b>${esc(s.label)}</b><span class="sl">${esc(sheetLine(s, it.stepAns[i], st))}</span>${markOf(it.stepScore[i])}</p>`).join('');
+    const head = st === 'yobiR' ? '答案（CBT：1頁23行・1行30字まで、4頁）' : '答案用紙';
+    return `<div class="sheet ${st === 'yobiR' ? 'cbt' : ''}"><p class="paperhead">${head}</p>${lines || '<p class="blank">選んだ内容が、ここに答案の骨組みとして書き込まれていく。</p>'}</div>`;
+  }
   function caseHtml(it) {
-    const q = it.q;
+    const q = it.q, st = SQ.styleOf(q);
     const kindName = q.stage === 'ronbun' ? '論文式' : '記述式';
     const reviewing = it.stepView === 'review';
     const stepper = q.steps.map((s, i) => `<span class="stp ${i < it.step || it.done ? 'done' : ''} ${i === it.step && !it.done ? 'cur' : ''}">${i + 1} ${esc(s.label)}</span>`).join('');
-    const upto = it.done ? q.steps.length : it.step + (reviewing ? 1 : 0);
-    const sheet = q.steps.slice(0, upto).map((s, i) => `<p><b>${esc(s.label)}</b><span class="sl">${esc(sheetLine(s, it.stepAns[i]))}</span>${markOf(it.stepScore[i])}</p>`).join('');
     let card = '';
     if (!it.done) {
       const s = q.steps[it.step], a = it.stepAns[it.step];
+      const symbols = st === 'shoshi' && s.type === 'multi';
       const opts = s.options.map((o, i) => {
         const on = s.type === 'multi' ? (a || []).includes(i) : a === i;
         let cls = on ? 'on' : '';
         if (reviewing) cls += o[1] ? (on ? ' right' : ' missed') : (on ? ' wrong' : '');
         const note = reviewing && o[2] ? `<small class="onote">${esc(o[2])}</small>` : '';
-        return `<button class="opt ${s.type === 'one' ? 'one' : ''} ${cls}" data-act="opt" data-i="${i}" ${reviewing ? 'disabled' : ''}><span class="box"></span><span class="otext">${esc(o[0])}${note}</span></button>`;
+        return `<button class="opt ${s.type === 'one' ? 'one' : ''} ${cls}" data-act="opt" data-i="${i}" ${reviewing || !editable(it) ? 'disabled' : ''}><span class="box"></span><span class="otext">${symbols ? `<b class="sym">${SYM[i]}</b>` : ''}${esc(o[0])}${note}</span></button>`;
       }).join('');
-      card = `<div class="stepcard" id="stepcard"><p class="prompt"><b>${esc(s.label)}</b>${esc(s.prompt)}${s.type === 'multi' ? '<small>当てはまるものをすべて選ぶ</small>' : ''}</p><div class="opts">${opts}</div></div>`;
+      card = `<div class="stepcard" id="stepcard"><p class="prompt"><b>${esc(s.label)}</b>${esc(s.prompt)}${symbols ? '<small>【添付情報一覧】の中から、提供すべきものの記号をすべて選ぶ</small>' : s.type === 'multi' ? '<small>当てはまるものをすべて選ぶ</small>' : ''}</p><div class="opts">${opts}</div></div>`;
     }
-    return `<p class="qtag">${esc(tagOf(q, kindName))}</p><h3 class="qtitle">${esc(q.title)}</h3>
+    const L1 = st === 'shoshi' ? '【事実関係】' : st === 'yobiR' ? '【事実】' : '【事案】';
+    const L2 = st === 'shoshi' ? '【問】' : st === 'yobiR' ? '〔設問〕' : '【設問】';
+    return `<p class="qtag">${esc(tagOf(q, kindName))}</p>
       ${easyBox(q)}
-      <div class="factbox"><p class="fl">【事案】</p><p>${nl(q.facts)}</p><p class="fl">【設問】</p><p>${nl(q.ask)}</p></div>
+      <article class="book st-${st || 'none'}">${bookHead(it)}
+        <div class="bcase"><p class="fl">${L1}</p><p>${bt(q.facts, q)}</p><p class="fl">${L2}</p><p>${bt(q.ask, q)}</p></div>
+      </article>
       <div class="stepper">${stepper}</div>
       ${card}
-      <div class="sheet"><p class="paperhead">答案用紙</p>${sheet || '<p class="blank">選んだ内容が、ここに答案の骨組みとして書き込まれていく。</p>'}</div>
+      ${sheetHtml(it)}
       <div class="fbhost" id="fb">${it.done ? feedbackCase(it) : ''}</div>`;
   }
   function caseKeyHtml(q) {
-    return q.steps.map(s => `<div class="rvstep"><p><b>${esc(s.label)}</b> ${esc(s.prompt)}</p><ul class="notes">${s.options.filter(o => o[1]).map(o => `<li><span class="tfmark o">◯</span><span>${esc(o[0])}${o[2] ? '<br><small>' + esc(o[2]) + '</small>' : ''}</span></li>`).join('')}</ul></div>`).join('') +
+    const st = SQ.styleOf(q);
+    return q.steps.map(s => `<div class="rvstep"><p><b>${esc(s.label)}</b> ${esc(s.prompt)}</p><ul class="notes">${s.options.map((o, i) => [o, i]).filter(([o]) => o[1]).map(([o, i]) => `<li><span class="tfmark o">◯</span><span>${st === 'shoshi' && s.type === 'multi' ? SYM[i] + '　' : ''}${esc(o[0])}${o[2] ? '<br><small>' + esc(o[2]) + '</small>' : ''}</span></li>`).join('')}</ul></div>`).join('') +
       `<p class="fl">答案の骨子（模範）</p><p class="model">${nl(q.model || '')}</p>`;
   }
   function feedbackCase(it) {
@@ -361,7 +448,7 @@
   function examiner(name, cls, talking) { return `<div class="ex ${cls} ${talking ? 'talk' : ''}"><span>${name}</span></div>`; }
   function oralHtml(it) {
     const q = it.q;
-    const head = `<p class="qtag">${esc(tagOf(q, '口述'))}</p><h3 class="qtitle">${esc(q.title)}</h3>${easyBox(q)}`;
+    const head = `<p class="qtag">${esc(tagOf(q, '口述'))}</p>${easyBox(q)}`;
     const facts = q.facts ? `<div class="factbox small"><p class="fl">【事例】</p><p>${nl(q.facts)}</p></div>` : '';
     if (!it.started) {
       return head + `<div class="oral"><div class="examiners">${examiner('主査', 'main', true)}${examiner('副査', 'sub', false)}</div>
@@ -394,59 +481,245 @@
     return q.turns.map((t, i) => `<div class="rvstep"><p><b>質問${i + 1}</b> ${esc(t.q)}</p><p class="ans">正解：${esc(t.options.find(o => o[1])[0])}</p>${t.e ? `<p class="exp">${esc(t.e)}</p>` : ''}</div>`).join('');
   }
 
-  /* ---------- 解答を見る（PCは問題の隣、スマホは問題の下に出したまま） ---------- */
+  /* ---------- 表紙（時限の始めの注意事項） ---------- */
+  function coverHtml(it) {
+    const p = perOf(it), pi = it.pno, stage = SQ.stage(run.exam, run.stage), paper = stage.paper, e = SQ.exam(run.exam);
+    const its = run.items.filter(x => x.pno === pi);
+    const n = its.length, st = paper.style;
+    const time = p.min ? dur(p.min) + (p.time ? '（' + p.time + '）' : '') : '';
+    const sel = p.select ? run.select[p.secs[0]] : 0;
+    const notes = [];
+    let top = '', title = '', sub = '';
+    const free = `本番の試験時間は${time || '試験官の進行による'}。この模擬に制限時間はありません。かかった時間は、終了後に本番の時間と比べて表示します。`;
+    switch (st) {
+      case 'yobi':
+        top = paper.based + '司法試験予備試験（模擬・非公式）'; title = paper.book; sub = '［' + p.name + '］';
+        notes.push('本番の問題は' + p.real + '。この模擬では、収録している' + n + '問を出題します（問題番号と解答欄の番号は、収録問題の通し番号です）。');
+        notes.push(p.select ? '解答は、画面下のマークシートで、解答欄（［No.1］から）ごとに番号を1つだけマークします。'
+          : '解答は、画面下のマークシートで、解答欄（［No.1］から）ごとに番号を1つだけマークします。各記述の正誤に1・2をつける問題は、記述ごとに解答欄があります。');
+        if (p.select) notes.push('本番は' + p.select.of + '題から' + p.select.pick + '題を選んで解答します。この模擬は' + n + '題から' + sel + '題。選んだ問題は、選択欄（「選」）と解答欄の両方にマークしてください。選択欄にマークのない解答は採点されません。指定数を超えて選択すると、問題番号の小さい方から' + sel + '題を採点します。');
+        else notes.push('配点は問題ごとに「（配点：2）」のように書かれています。部分点のある問題もありますが、その基準は問題文には書かれません（本アプリは近似で採点します）。');
+        notes.push(free);
+        break;
+      case 'cpa':
+        top = '公認会計士試験（模擬・非公式）'; title = '短答式試験問題'; sub = p.name;
+        notes.push('本番：' + p.real + '。' + p.pts + '。この模擬では、収録している' + n + '問を出題します。');
+        notes.push('解答は［1、2、3、4、5、6］の中から一つだけ選び、画面下の答案用紙（解答欄）にマークします。本番では、複数マークしている問題は不正解になります。');
+        notes.push(free);
+        break;
+      case 'shoshi':
+        top = paper.based + ' 司法書士試験（模擬・非公式）'; title = '試験問題'; sub = '（' + p.name + '）';
+        notes.push('試験時間は、' + dur(p.min) + 'です（本番 ' + p.time + '）。この模擬に制限時間はありません。');
+        notes.push('本番の試験問題は、' + p.real + 'です。この模擬では、収録している' + n + '問を出題します。');
+        notes.push('多肢択一式の解答は、答案用紙の正解と思われるものの番号を、各問につき1か所だけ塗りつぶします。');
+        if (its.some(x => x.q.kind === 'case')) notes.push('記述式（第36問・第37問）は、答案用紙の欄（登記の目的・申請事項等・添付情報・登録免許税など）に書き込みます。本アプリは選択肢から選んで書き込み、添付情報は【添付情報一覧】の記号で答えます。');
+        notes.push('解答に当たり適用すべき法令は、本アプリでは2026年11月1日現在のものとします（本番は試験の年の4月1日現在）。');
+        break;
+      case 'benri':
+        top = paper.based + '弁理士試験（模擬・非公式）'; title = paper.book; sub = '';
+        notes.push('本番は60題・' + dur(p.min) + 'の5肢択一。問題番号は科目ごとに振られています：' + p.real + '。この模擬では、収録している' + n + '題を出題します。');
+        notes.push('各題とも1〜5の中から1つを選び、画面下のマークシートにマークします。1題1点です。');
+        notes.push(free);
+        break;
+      case 'yobiR':
+        top = paper.based + ' 司法試験予備試験（模擬・非公式）'; title = paper.book; sub = '［' + p.name + '］' + (p.day ? ' ' + p.day + '日目' : '');
+        notes.push('本番はCBT方式で、答案をパソコンで入力します。1頁23行・1行30字まで、各科目4頁。紙の試験用法文が配られます。');
+        notes.push('この模擬では、答案を書く代わりに「論点 → 規範 → 結論」を選んで、答案の骨組みを組み立てます。');
+        notes.push(free);
+        break;
+      case 'cpaR':
+        top = '公認会計士試験（模擬・非公式）'; title = '論文式試験問題'; sub = p.name + (p.day ? '（' + p.day + '日目）' : '');
+        notes.push('この模擬では、計算結果や理論の要点を選んで、答案の骨組みを組み立てます。');
+        notes.push(free);
+        break;
+      case 'benriR':
+        top = paper.based + '弁理士試験（模擬・非公式）'; title = paper.book; sub = '【' + p.name + '】';
+        notes.push('この模擬では、論点・規範・結論を選んで、答案の骨組みを組み立てます。');
+        notes.push(free);
+        break;
+      default:
+        top = e.name + '（模擬・非公式）'; title = '口述試験'; sub = p.name;
+        notes.push('試験室に入ると、主査（中央の試験官）が質問し、副査が補足します。この模擬では、答えを選んで口頭の代わりにします。');
+        notes.push('答えに詰まると、副査が助け舟を出します（助け舟のあとの正解は半分の評価）。時間制限はありません。');
+    }
+    if (pi > 0) notes.unshift('前の時限の答案は回収しました。ここからは「' + p.name + '」です。');
+    if (S.set.dock) notes.push('いま「解答を表示したまま」になっています。このまま始めると問題と一緒に解答が出るので、この挑戦は参考記録になります（画面下の「解答を閉じる」で戻せます）。');
+    const total = run.periods.length;
+    return `<article class="book cover st-${st}">
+      <p class="cvtop">${esc(top)}</p>
+      <h2 class="cvtitle">${esc(title)}</h2>
+      ${sub ? `<p class="cvsub">${esc(sub)}</p>` : ''}
+      ${total > 1 ? `<p class="cvstep">${pi + 1} / ${total} 時限目${p.day ? ' · ' + p.day + '日目' : ''}</p>` : ''}
+      <div class="cvbox"><p class="cvh">注　意</p><ol>${notes.map(t => '<li>' + esc(t) + '</li>').join('')}</ol></div>
+      ${p.min ? `<p class="cvtime">試験時間（本番）　${esc(dur(p.min))}${p.time ? '　' + esc(p.time) : ''}</p>` : ''}
+    </article>`;
+  }
+
+  /* ---------- 解答（PCは問題の隣、スマホは問題の下。閉じるまで次の問題以降も出したまま） ---------- */
   function dockHtml(it) {
     const q = it.q;
     const body = q.kind === 'mcq' ? mcqKeyHtml(q) : q.kind === 'case' ? caseKeyHtml(q) : oralKeyHtml(q);
     return `<section class="panel answerdock"><header class="dockhead"><h3>解答です</h3><button class="small" data-act="closeDock" aria-label="解答を閉じる">×</button></header>${body}
-      <p class="mini">解答を見た問題は、学習記録とXPに入りません。${road() ? '本試験モードでは、この挑戦が参考記録になります（ロードは進みません）。' : ''}</p></section>`;
+      <p class="mini">「解答を閉じる」を押すまで、次の問題以降も解答を出したままにします。解答を見た問題は、学習記録とXPに入りません。${road() ? '本試験モードでは、この挑戦が参考記録になります（ロードは進みません）。' : ''}</p></section>`;
   }
 
-  /* ---------- 下に固定したマークシート ---------- */
+  /* ---------- マークシート（画面の下に固定） ---------- */
+  function sheetRowsHtml(it) {
+    const q = it.q, st = SQ.styleOf(q), ed = editable(it), key = SQ.mcqKey(q), sec = SQ.secOf(q);
+    const lab = k => {
+      if (!run.stage) return 'Q' + (run.idx + 1);
+      if (st === 'yobi') return 'No.' + it.boxes[k];
+      if (st === 'cpa') return '問題' + it.no;
+      if (st === 'shoshi') return '第' + it.no + '問';
+      if (st === 'benri') return (sec.short || sec.name) + ' ' + it.no;
+      return 'Q' + (run.idx + 1);
+    };
+    if (q.form === 'tf') {
+      return q.st.map((s, k) => {
+        const a = it.ans ? it.ans[k] : undefined;
+        const b = v => {
+          let cls = a === v ? 'on' : '';
+          if (it.done) cls += a === v ? (v === s[2] ? ' right' : ' wrong') : (v === s[2] ? ' key' : '');
+          return `<button class="mb ${cls}" data-act="tf" data-i="${k}" data-v="${v ? 1 : 0}" ${ed ? '' : 'disabled'} aria-label="${esc(lab(k))} ${esc(s[0])}は${v ? '正しい（1）' : '誤り（2）'}">${v ? 1 : 2}</button>`;
+        };
+        return `<div class="mrow"><span class="mlab">${esc(lab(k))}<small>${esc(s[0])}</small></span>${b(true)}${b(false)}</div>`;
+      }).join('');
+    }
+    const selCell = run.select && run.select[q.sec] ? `<button class="mb selbox ${it.sel ? 'on' : ''}" data-act="sel" ${ed ? '' : 'disabled'} aria-pressed="${it.sel}" aria-label="選択欄">選</button><i class="msep"></i>` : '';
+    const cells = key.choices.map((c, i) => {
+      let cls = it.ans === i ? 'on' : '';
+      if (it.done) cls += i === key.answer ? (it.ans === i ? ' right' : ' key') : it.ans === i ? ' wrong' : '';
+      return `<button class="mb ${cls}" data-act="pick" data-i="${i}" ${ed ? '' : 'disabled'} aria-label="${c.no}番">${c.no}</button>`;
+    }).join('');
+    return `<div class="mrow"><span class="mlab">${esc(lab(0))}</span>${selCell}${cells}</div>`;
+  }
+  // 「次へ」の行き先の説明（次の問題が別の時限なら「次の時限へ」）
+  function nextLabel() {
+    if (isLast()) return '提出する';
+    const nx = run.items[run.idx + 1];
+    return hasP() && nx.pno !== cur().pno && road() ? '次の時限へ →' : '次へ進む →';
+  }
   function markbarHtml(it) {
+    if (covering(it)) {
+      const oral = it.q.kind === 'oral';
+      return `<div class="mnav"><button data-act="reveal" class="${S.set.dock ? 'on' : ''}">${S.set.dock ? '解答を閉じる' : '解答を見る'}</button><button class="primary" data-act="openPeriod">${oral ? '入室する →' : '解答を始める →'}</button></div>`;
+    }
     const q = it.q, rd = road();
-    const nextBtn = isLast() && rd ? `<button class="primary" data-act="next">提出する</button>` :
-      `<button class="primary" data-act="next">${rd ? '次へ進む →' : run.items.every(s => s.done) ? '結果を見る ▶' : '次へ →'}</button>`;
+    const nextBtn = `<button class="primary" data-act="next">${rd ? nextLabel() : run.items.every(s => s.done) ? '結果を見る ▶' : '次へ →'}</button>`;
     let marks = '', primary = '';
     if (q.kind === 'mcq') {
-      if (q.form === 'tf') {
-        marks = q.st.map((s, i) => {
-          const a = it.ans ? it.ans[i] : undefined;
-          const res = it.done ? (a === s[2] ? ' right' : ' wrong') : '';
-          return `<span class="mgroup"><b>${esc(s[0])}</b><button class="mb ${a === true ? 'on' : ''}${a === true ? res : ''}" data-act="tf" data-i="${i}" data-v="1" ${it.done ? 'disabled' : ''} aria-label="${esc(s[0])}は正しい">1</button><button class="mb ${a === false ? 'on' : ''}${a === false ? res : ''}" data-act="tf" data-i="${i}" data-v="0" ${it.done ? 'disabled' : ''} aria-label="${esc(s[0])}は誤り">2</button></span>`;
-        }).join('');
-      } else {
-        const key = SQ.mcqKey(q);
-        marks = key.choices.map((c, i) => {
-          let cls = it.ans === i ? 'on' : '';
-          if (it.done) cls += i === key.answer ? ' right' : it.ans === i ? ' wrong' : '';
-          return `<button class="mb ${cls}" data-act="pick" data-i="${i}" ${it.done ? 'disabled' : ''} aria-label="${c.no}番">${c.no}</button>`;
-        }).join('');
-      }
+      marks = sheetRowsHtml(it);
       primary = rd || it.done ? nextBtn : `<button class="primary" data-act="commit" ${canCommit(it) ? '' : 'disabled'}>解答する</button>`;
+      if (!editable(it) && !it.done) primary = nextBtn;
     } else if (q.kind === 'case') {
       const lastStep = it.step === q.steps.length - 1;
-      if (it.done) primary = nextBtn;
+      if (it.done || !editable(it)) primary = nextBtn;
       else if (it.stepView === 'review') primary = `<button class="primary" data-act="stepNext">${lastStep ? '答案を仕上げる' : '次の段落へ →'}</button>`;
       else primary = `<button class="primary" data-act="commitStep" ${canStep(it) ? '' : 'disabled'}>${rd && lastStep ? (isLast() ? '書いて提出へ' : '書いて次へ進む →') : 'この内容で書く'}</button>`;
     } else {
-      if (it.done) primary = nextBtn;
+      if (it.done || !editable(it)) primary = nextBtn;
       else if (!it.started) primary = `<button class="primary" data-act="oralStart">口述をはじめる</button>`;
       else if (it.oralPhase === 'review') primary = `<button class="primary" data-act="oralNext">${it.turn < q.turns.length - 1 ? '次の質問へ →' : '口述を終える'}</button>`;
       else primary = `<span class="mhint">答えをタップ</span>`;
     }
-    const reveal = it.done ? '' : `<button class="${it.revealed && it.dock ? 'on' : ''}" data-act="reveal">${it.revealed && it.dock ? '解答を閉じる' : '解答を見る'}</button>`;
+    const reveal = `<button class="${S.set.dock ? 'on' : ''}" data-act="reveal">${S.set.dock ? '解答を閉じる' : '解答を見る'}</button>`;
     const flag = it.done ? '' : `<button class="${it.flag ? 'on' : ''}" data-act="flag" aria-label="あとで見直す">⚑${it.flag ? ' 見直し' : ''}</button>`;
-    return `${marks ? `<div class="marks">${marks}</div>` : ''}<div class="mnav"><button data-act="prev" ${run.idx === 0 ? 'disabled' : ''} aria-label="前の問題">←</button>${flag}${reveal}${primary}</div>`;
+    const sheetName = q.kind === 'mcq' && run.stage ? `<p class="mtitle">${esc(sheetTitle(it))}</p>` : '';
+    return `${marks ? `<div class="msheet">${sheetName}<div class="marks">${marks}</div></div>` : ''}<div class="mnav"><button data-act="prev" ${run.idx === 0 || (road() && hasP() && run.items[run.idx - 1].pno !== run.curP && !run.items[run.idx - 1].done) ? 'disabled' : ''} aria-label="前の問題">←</button>${flag}${reveal}${primary}</div>`;
+  }
+  function sheetTitle(it) {
+    const p = perOf(it);
+    switch (SQ.styleOf(it.q)) {
+      case 'yobi': return '答案用紙（マークシート）' + (p ? '［' + p.name + '］' : '');
+      case 'cpa': return '答案用紙【' + SQ.secOf(it.q).name + '】';
+      case 'shoshi': return '多肢択一式答案用紙' + (p ? '（' + p.name + '）' : '');
+      case 'benri': return '短答式 答案用紙';
+      default: return '';
+    }
+  }
+
+  /* ---------- 時限・科目・問題の行き来 ---------- */
+  function pnavHtml() {
+    if (run.periods.length < 2) return '';
+    const it = cur();
+    return '<div class="pnav">' + run.periods.map((p, i) => {
+      const its = run.items.filter(x => x.pno === i), done = its.filter(x => x.done).length;
+      let st = i === it.pno ? 'on' : '', tag = done + '/' + its.length;
+      if (road()) {
+        if (i < run.curP) { st += ' past'; tag = '提出済み'; } else if (i > run.curP) { st += ' lock'; tag = '未開始'; }
+      }
+      return `<button class="${st}" data-act="period" data-p="${i}" ${road() ? 'disabled' : ''}>${esc(p.name)}<small>${p.day ? p.day + '日目 · ' : ''}${p.min ? dur(p.min) + ' · ' : ''}${tag}</small></button>`;
+    }).join('') + '</div>';
+  }
+  function secnavHtml() {
+    if (!run.stage) return '';
+    const stage = SQ.stage(run.exam, run.stage), it = cur();
+    const secs = stage.sections.map(sec => {
+      const its = run.items.map((s, i) => [s, i]).filter(([s]) => s.q.sec === sec.id && (!hasP() || s.pno === it.pno));
+      if (!its.length) return '';
+      const done = its.filter(([s]) => s.done).length;
+      return `<button class="${it.q.sec === sec.id ? 'on' : ''}" data-act="nav" data-i="${its[0][1]}">${esc(sec.name)} <small>${stage.kind === 'oral' ? '' : sec.points + '点 '}${done}/${its.length}</small></button>`;
+    }).filter(Boolean);
+    return secs.length > 1 ? '<div class="secnav">' + secs.join('') + '</div>' : '';
+  }
+  function chipLabel(s) {
+    if (!run.stage) return String(run.items.indexOf(s) + 1);
+    const st = SQ.styleOf(s.q), sec = SQ.secOf(s.q);
+    return st === 'benri' ? (sec.short || sec.name).slice(0, 1) + s.no : String(s.no);
+  }
+  function scrRun() {
+    const it = cur(), e = SQ.exam(it.q.exam), cov = covering(it);
+    const docked = S.set.dock && !it.done && !cov;
+    const chips = run.items.map((s, i) => {
+      if (hasP() && s.pno !== it.pno) return '';
+      let c = i === run.idx ? 'cur ' : '';
+      if (s.done) c += s.score >= 0.999 ? 'ok' : s.score > 0 ? 'mid' : 'ng';
+      else if (s.flag) c += 'flag';
+      if (s.sel) c += ' picked';
+      const lock = road() && hasP() && s.pno !== run.curP && !s.done;
+      return `<button class="qc ${c}" data-act="nav" data-i="${i}" ${lock ? 'disabled' : ''} aria-label="${esc(qLabel(s))}">${esc(chipLabel(s))}</button>`;
+    }).join('');
+    const answered = run.items.filter(s => s.done).length;
+    const p = perOf(it);
+    const paper = run.stage ? SQ.stage(run.exam, run.stage).paper : null;
+    const ink = paper && paper.ink ? paper.ink : e.color;
+    return `<div class="shell runshell ${run.mode}"><div class="wrap runwrap ${docked ? 'docked' : ''}">
+      <div class="runhdr">
+        <div class="rl"><b>${esc(runTitle())}${p && run.periods.length > 1 ? ' · ' + esc(p.name) : ''}</b><small>${road() ? '本試験モード ·「次へ進む」で答え合わせ' : '練習モード · 1問ごとに解説'}</small></div>
+        <div class="rr"><span class="qno">${cov ? '表紙' : esc(qLabel(it))}</span><span class="done">解答 ${answered}/${run.items.length}</span><span class="get">GET <b id="get">${fmtPts(run.get)}</b>${run.stage ? '<small>点</small>' : ''}</span><span class="combo" id="combo" data-tier="${comboTier()}">COMBO <b>${run.combo}</b></span><button class="small" data-act="pause">中断</button></div>
+      </div>
+      ${pnavHtml()}
+      ${cov ? '' : secnavHtml()}
+      ${cov ? '' : `<div class="qnav">${chips}</div>`}
+      ${lastJudgeHtml()}
+      <div class="quizgrid ${docked ? 'docked' : ''}">
+        <section class="qpanel kind-${it.q.kind} ${cov ? 'covering' : ''}" id="qpanel" style="--ec:${e.color};--et:${e.tint}">${cov ? coverHtml(it) : itemHtml(it)}</section>
+        ${docked ? `<aside class="dock" id="dock" style="--ec:${e.color};--et:${e.tint}">${dockHtml(it)}</aside>` : ''}
+      </div>
+      <div class="markbar" id="markbar" style="--ec:${e.color};--et:${e.tint};--mk:${ink}">${markbarHtml(it)}</div>
+    </div></div>`;
+  }
+  function itemHtml(it) {
+    if (it.q.kind === 'case') return caseHtml(it);
+    if (it.q.kind === 'oral') return oralHtml(it);
+    return mcqHtml(it);
   }
 
   /* ================= 進行 ================= */
   let shownIdx = -1;
+  // 解答を表示したままのとき、まだ解いていない問題を開いたら「解答を見た」扱いにする
+  function seeAnswer(it) {
+    if (!S.set.dock || !run || run.finished || it.done || it.revealed || covering(it)) return;
+    it.revealed = true; run.peeked++; run.combo = 0; FX.fever(false);
+    if (road() && run.peeked === 1) toast('解答を見たので、この挑戦は参考記録になります');
+  }
   function renderRun(scroll) {
+    seeAnswer(cur());
     const sh0 = app.querySelector('.shell'), y = sh0 ? sh0.scrollTop : 0;
     app.innerHTML = scrRun();
     // 問題が変わったときだけ入場の動きをつける（マークを押すたびに揺れないように）
-    if (run.idx !== shownIdx) { const w = app.querySelector('.runwrap'); if (w) w.classList.add('enter'); shownIdx = run.idx; }
+    const key = run.idx + (covering(cur()) ? 'c' : '');
+    if (key !== shownIdx) { const w = app.querySelector('.runwrap'); if (w) w.classList.add('enter'); shownIdx = key; }
     const sh = app.querySelector('.shell');
     if (sh) sh.scrollTop = scroll === 'top' ? 0 : y;
     // 自動のスクロールは一瞬で（なめらかスクロールは裏のタブで止まることがあり、目の前で動き続けるのも疲れる）
@@ -478,7 +751,11 @@
   function stopAll() { clearTimeout(autoTimer); FX.fever(false); FX.hush(); }
   function goIdx(i, scroll) {
     clearTimeout(autoTimer); FX.hush();
-    run.idx = SQ.clamp(i, 0, run.items.length - 1);
+    i = SQ.clamp(i, 0, run.items.length - 1);
+    const t = run.items[i];
+    // 本試験モード：先の時限には「次の時限へ」からしか進めない。前の時限は答え合わせ済みの問題だけ見られる
+    if (road() && hasP() && (t.pno > run.curP || (t.pno < run.curP && !t.done))) return;
+    run.idx = i;
     persist();
     const it = cur(), midOral = it.q.kind === 'oral' && it.started && !it.done;
     renderRun(scroll || (midOral ? 'turn' : 'top'));
@@ -491,6 +768,45 @@
   }
   // 練習モードの「次へ」：まだ解いていない次の問題へ。全部解いたら結果へ。
   function advance() { const i = nextUndone(); if (i < 0) finish(); else goIdx(i); }
+
+  // 本試験モードで問題 i を終えたあとの行き先：同じ時限の次の問題／次の時限の表紙／提出
+  function moveOn(i) {
+    if (i >= run.items.length - 1) return submit();
+    const nx = run.items[i + 1];
+    if (hasP() && nx.pno > run.curP) return endPeriod();
+    goIdx(i + 1);
+  }
+  // 今の時限を終えて次の時限へ（未解答があれば確認）。前の時限の答案は回収済みになる
+  function endPeriod() {
+    const p = run.curP, left = run.items.filter(x => x.pno === p && !x.done).length;
+    if (p >= run.periods.length - 1) return submit();
+    if (left) {
+      return modal(`<div class="sheethead"><h2>この時限を終えますか？</h2><button data-act="closeModal">戻る</button></div>
+        <p class="muted">「${esc(run.periods[p].name)}」でまだ答えていない問題が ${left} 問あります。次の時限へ進むと、この時限の答案は回収され、戻って解くことはできません（未解答は0点）。</p>
+        <div class="actions"><button class="primary" data-act="nextPeriod">答案を出して次の時限へ</button><button data-act="closeModal">戻って解く</button></div>`);
+    }
+    nextPeriod();
+  }
+  function nextPeriod() {
+    closeModal(false);
+    run.curP = Math.min(run.curP + 1, run.periods.length - 1);
+    const p = run.periods[run.curP];
+    run.idx = p.from;
+    persist();
+    FX.play('start');
+    renderRun('top');
+  }
+  function openPeriod() {
+    const it = cur();
+    if (!covering(it)) return;
+    run.opened[it.pno] = true;
+    lastTick = idleAt = Date.now();
+    persist();
+    FX.play('start');
+    FX.banner(run.periods[it.pno].name, 'go', road() ? '解答はじめ' : '');
+    const midOral = it.q.kind === 'oral' && it.started && !it.done;
+    renderRun(midOral ? 'turn' : 'top');
+  }
 
   // 正誤の状態更新（コンボ・GET・XP）。演出は playFx で、描き直したあとに出す。
   function applyScore(it, score, pts, small) {
@@ -543,21 +859,22 @@
     SQ.store.save();
   }
   function setLastJudge(it, i) {
-    run.lastJudge = { idx: i, kind: it.q.kind, score: it.score, got: it.score * it.max, pts: it.max, ans: answerText(it.q) };
+    const unsel = !!(run.select && run.select[it.q.sec] && !it.sel);
+    run.lastJudge = { idx: i, kind: it.q.kind, score: it.score, got: it.score * it.pts, pts: it.pts, ans: answerText(it.q), label: qLabel(it), unsel };
   }
 
   // 択一の答え合わせ（状態だけ）。演出情報を返す
   function gradeMcq(it) {
     const j = SQ.judgeMcq(it.q, it.ans);
-    it.score = j.score; it.done = true; it.flag = false; it.dock = false;
-    const info = applyScore(it, j.score, j.score * it.max);
+    it.score = j.score; it.done = true; it.flag = false;
+    const info = applyScore(it, j.score, j.score * it.pts);
     recordItem(it);
     return info;
   }
   // 練習モード「解答する」
   function commitMcq() {
     const it = cur();
-    if (it.done || !canCommit(it)) return;
+    if (!editable(it) || !canCommit(it)) return;
     const info = gradeMcq(it);
     persist();
     renderRun('fb');
@@ -567,10 +884,10 @@
   function nextRoad() {
     const it = cur(), i = run.idx;
     let info = null;
-    if (it.q.kind === 'mcq' && !it.done && canCommit(it)) { info = gradeMcq(it); setLastJudge(it, i); }
-    if (isLast()) { persist(); if (info) { renderRun('keep'); playFx(info); } return submit(); }
-    goIdx(i + 1);
-    if (info) playFx(info);
+    if (it.q.kind === 'mcq' && editable(it) && canCommit(it)) { info = gradeMcq(it); setLastJudge(it, i); }
+    persist();
+    if (info) { moveOn(i); playFx(info); return; }
+    moveOn(i);
   }
   function submit() {
     const left = run.items.filter(s => !s.done).length;
@@ -583,11 +900,11 @@
   /* ---------- 論文・記述の進行 ---------- */
   function commitStep() {
     const it = cur(), s = it.q.steps[it.step];
-    if (it.done || it.stepView === 'review' || !canStep(it)) return;
+    if (!editable(it) || it.stepView === 'review' || !canStep(it)) return;
     const j = SQ.judgeStep(s, it.stepAns[it.step]);
     it.stepScore[it.step] = j.score;
     const tot = it.q.steps.reduce((a, x) => a + x.pts, 0);
-    const info = applyScore(it, j.score, j.score * s.pts / tot * it.max, true);
+    const info = applyScore(it, j.score, j.score * s.pts / tot * it.pts, true);
     const word = s.label + (j.score >= 0.999 ? ' ◯' : j.score > 0 ? ' △' : ' ✕');
     if (!road()) {
       it.stepView = 'review';
@@ -608,12 +925,11 @@
     finishCase(it);
     setLastJudge(it, i);
     persist();
-    if (isLast()) { renderRun('keep'); playFx(info, word); return submit(); }
-    goIdx(i + 1);
+    moveOn(i);
     playFx(info, word);
   }
   function finishCase(it) {
-    it.done = true; it.stepView = null; it.dock = false;
+    it.done = true; it.stepView = null;
     it.score = SQ.caseScore(it.q, it.stepScore);
     recordItem(it);
     if (it.score >= 0.999) setTimeout(() => FX.banner('満点答案', 'crit', it.q.title), 400);
@@ -631,6 +947,7 @@
   /* ---------- 口述の進行（制限時間なし。間違えると助け舟） ---------- */
   function oralBegin() {
     const it = cur();
+    if (!editable(it)) return;
     it.started = true; it.turn = 0; it.tries = 0; it.oralPhase = 'ask'; it.wrongPick = null;
     persist();
     renderRun('turn');
@@ -638,7 +955,7 @@
   }
   function oralAnswer(i) {
     const it = cur();
-    if (!it || it.q.kind !== 'oral' || it.done || !it.started || it.oralPhase === 'review') return;
+    if (!it || it.q.kind !== 'oral' || it.done || !it.started || it.oralPhase === 'review' || !editable(it)) return;
     const t = it.q.turns[it.turn];
     const ok = t.options[i] && t.options[i][1];
     let info;
@@ -677,13 +994,15 @@
       return;
     }
     const i = run.idx;
-    it.done = true; it.dock = false; it.score = SQ.oralScore(it.q, it.turnScore);
+    it.done = true; it.score = SQ.oralScore(it.q, it.turnScore);
     recordItem(it);
     persist();
     if (road()) {
       setLastJudge(it, i);
-      if (isLast()) { renderRun('keep'); return submit(); }
-      autoTimer = setTimeout(() => { if (run && !run.paused && run.idx === i) goIdx(i + 1); }, 700);
+      renderRun('keep');
+      if (isLast()) return submit();
+      autoTimer = setTimeout(() => { if (run && !run.paused && run.idx === i) moveOn(i); }, 700);
+      return;
     }
     renderRun('keep');
   }
@@ -722,7 +1041,7 @@
     FX.clear();
     go('run');
     const it = cur();
-    if (it.q.kind === 'oral' && it.started && !it.done) renderRun('turn');
+    if (it.q.kind === 'oral' && it.started && !it.done && !covering(it)) renderRun('turn');
     FX.banner('RESUME', 'go', runTitle());
   }
 
@@ -755,12 +1074,26 @@
 
   /* ================= 結果 ================= */
   const RANKMSG = { S: '文句なし。合格者の答案。', A: '安定して合格圏。', B: 'あと一押しで合格圏。', C: '土台はできている。', D: '伸びしろしかない。' };
+  // 時限ごとの時間：かかった時間と本番の試験時間、1問あたりのペース
+  function timeTable(r) {
+    if (!r.periods || !r.periods.length || !r.periods.some(p => p.min)) return '';
+    const rows = r.periods.map((p, i) => {
+      const its = r.items.filter(x => x.pno === i), t = r.pElapsed[i] || 0;
+      if (!p.min) return `<tr><td>${esc(p.name)}</td><td>${span(t)}</td><td>—</td><td>—</td></tr>`;
+      const real = p.count ? p.min * 60 / p.count : 0;
+      const mine = its.length ? t / its.length : 0;
+      const fast = real && mine <= real;
+      return `<tr><td>${esc(p.name)}${p.time ? `<small>${esc(p.time)}</small>` : ''}</td><td><b>${span(t)}</b><small>${its.length}問</small></td><td>${dur(p.min)}${p.count ? `<small>${p.count}問</small>` : ''}</td><td class="${real ? (fast ? 'fast' : 'slow') : ''}">${mine ? mmss(mine) : '—'}${real ? `<small>本番の目安 ${mmss(real)}</small>` : ''}</td></tr>`;
+    }).join('');
+    return `<div class="sectitle"><h2>時限ごとの時間</h2><span class="muted">制限時間なし · 本番の試験時間と比べる</span></div>
+      <div class="panel ttable"><table><thead><tr><th>時限</th><th>かかった時間</th><th>本番</th><th>1問あたり</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
   function scrResult() {
     if (!last) return scrHome();
     const { run: r, res, event, reference } = last;
     const e = r.exam ? SQ.exam(r.exam) : null, stage = r.stage ? SQ.stage(r.exam, r.stage) : null;
     const color = e ? e.color : '#7c4dff', tint = e ? e.tint : '#f1ebfc';
-    const chips = [r.interrupted ? '中断あり' : '', r.peeked ? '解答を見た問題 ' + r.peeked : '', reference ? '参考記録' : ''].filter(Boolean).map(c => `<span class="rchip">${esc(c)}</span>`).join('');
+    const chips = [r.interrupted ? '中断あり' : '', r.peeked ? '解答を見た問題 ' + r.peeked : '', reference ? '参考記録' : '', stage && res.rawMax ? '素点 ' + fmtPts(res.rawGot) + ' / ' + fmtPts(res.rawMax) + '点（収録' + r.items.length + '問）' : ''].filter(Boolean).map(c => `<span class="rchip">${esc(c)}</span>`).join('');
     let hero;
     if (stage) {
       const scoreTxt = res.abc ? `<b class="abc">${esc(res.abc)}</b>` : `<b id="cnt" data-to="${res.score}">0</b><small> / ${fmtPts(res.of)}${res.unit && res.unit !== '点' ? ' ' + esc(res.unit) : ''}</small>`;
@@ -769,6 +1102,7 @@
       hero = `<p class="kicker">RESULT · ${esc(e.short)} ${esc(stage.name)}${r.mode === 'road' ? ' · 本試験モード' : ' · 練習'}</p>
         <div class="rank r-${res.rank}">${res.rank}</div>
         <div class="score">${scoreTxt}</div>
+        ${res.abc ? '' : '<p class="scorehint">本番換算（収録問題の得点率 × 本番の配点）</p>'}
         ${bar}
         <div class="seal ${res.pass ? 'pass' : 'fail'}">${reference ? '参考' : res.pass ? '合格' : '不合格'}</div>
         <p class="rankmsg">${esc(RANKMSG[res.rank])}${r.mode === 'practice' ? '（練習のため、ロードは進みません）' : ''}</p>`;
@@ -812,6 +1146,7 @@
           <div class="panel stat"><small>最大コンボ</small><strong>${r.maxCombo}</strong></div>
           <div class="panel stat xp"><small>獲得XP</small><strong>+${r.xp}</strong></div>
         </div>
+        ${timeTable(r)}
         ${secRows ? `<div class="sectitle"><h2>区分別</h2><span class="muted">${esc(stage.rule.label)}</span></div><div class="panel secrows">${secRows}</div>` : ''}
         ${res.notes && res.notes.length ? `<ul class="notesbox">${res.notes.map(n => '<li>' + esc(n) + '</li>').join('')}</ul>` : ''}
         <div class="actions center">
@@ -820,12 +1155,12 @@
           <button data-act="home">ホーム</button>
         </div>
         <div class="sectitle"><h2>解答と解説</h2><span class="muted">タップで開く</span></div>
-        <div class="reviews">${r.items.map(reviewHtml).join('')}</div>
+        <div class="reviews">${r.items.map((it, i) => reviewHtml(it, i, r)).join('')}</div>
       </section>
       ${foot()}
     </div></div>`;
   }
-  function reviewHtml(it, i) {
+  function reviewHtml(it, i, r) {
     const q = it.q, sc = it.score || 0;
     const mark = sc >= 0.999 ? '◯' : sc > 0 ? '△' : '✕';
     let body = `<div class="easy small"><p class="eh">🔰 かんたんに言うと</p><p>${esc(SQ.easyOf(q))}</p></div>`;
@@ -837,10 +1172,11 @@
         (q.st && q.form !== 'pick' ? '<ul class="notes">' + q.st.map((s, k) => `<li><b>${esc(key.labels[k])}</b><span class="tfmark ${s[2] ? 'o' : 'x'}">${s[2] ? '◯' : '✕'}</span><span>${esc(s[1])}<br><small>${esc(s[3] || '')}</small></span></li>`).join('') + '</ul>' : '') +
         (q.e ? `<p class="exp">${esc(q.e)}</p>` : '');
     } else if (q.kind === 'case') {
+      const st = SQ.styleOf(q);
       body += `<p class="qtext small">${nl(q.facts)}<br><b>${esc(q.ask)}</b></p>` + q.steps.map((s, k) => {
         const a = it.stepAns[k];
-        const right = s.options.filter(o => o[1]).map(o => o[0]).join('／');
-        return `<div class="rvstep"><p><b>${esc(s.label)}</b> ${markOf(it.stepScore[k])} ${esc(s.prompt)}</p><p class="ans">あなた：${esc(a == null || (Array.isArray(a) && !a.length) ? '未解答' : sheetLine(s, a))}<br>正解：${esc(right)}</p></div>`;
+        const right = s.options.map((o, x) => [o, x]).filter(([o]) => o[1]).map(([o, x]) => (st === 'shoshi' && s.type === 'multi' ? SYM[x] + ' ' : '') + o[0]).join('／');
+        return `<div class="rvstep"><p><b>${esc(s.label)}</b> ${markOf(it.stepScore[k])} ${esc(s.prompt)}</p><p class="ans">あなた：${esc(a == null || (Array.isArray(a) && !a.length) ? '未解答' : sheetLine(s, a, st))}<br>正解：${esc(right)}</p></div>`;
       }).join('') + `<p class="fl">答案の骨子（模範）</p><p class="model">${nl(q.model || '')}</p>`;
     } else {
       body += (q.facts ? `<p class="qtext small">${nl(q.facts)}</p>` : '') + q.turns.map((t, k) => {
@@ -848,7 +1184,19 @@
         return `<div class="rvstep"><p>${markOf(it.turnScore[k])} ${esc(t.q)}</p><p class="ans">正解：${esc(right)}</p>${t.e ? `<p class="exp">${esc(t.e)}</p>` : ''}</div>`;
       }).join('');
     }
-    return `<details class="panel review"><summary><span class="mk ${sc >= 0.999 ? 'ok' : sc > 0 ? 'mid' : 'ng'}">${mark}</span><span class="rvno">${i + 1}</span><span class="rvt">${esc(q.title)}${it.revealed ? ' <i class="peek">解答を見た</i>' : ''}</span><small>${esc(SQ.exam(q.exam).short)} · ${esc((SQ.secOf(q) || {}).name || '')}</small></summary><div class="rvbody">${body}</div></details>`;
+    const counted = r && r.select && r.select[q.sec] ? (SQ.countedSet(r, q.sec).has(it) ? ' <i class="peek">採点</i>' : ' <i class="peek off">採点外</i>') : '';
+    const lab = r && r.stage ? labelFor(r, it) : String(i + 1);
+    return `<details class="panel review"><summary><span class="mk ${sc >= 0.999 ? 'ok' : sc > 0 ? 'mid' : 'ng'}">${mark}</span><span class="rvno">${esc(lab)}</span><span class="rvt">${esc(q.title)}${it.revealed ? ' <i class="peek">解答を見た</i>' : ''}${counted}</span><small>${esc(SQ.exam(q.exam).short)} · ${esc((SQ.secOf(q) || {}).name || '')}</small></summary><div class="rvbody">${body}</div></details>`;
+  }
+  function labelFor(r, it) {
+    const sec = SQ.secOf(it.q);
+    switch (SQ.styleOf(it.q)) {
+      case 'yobi': return '第' + it.no + '問';
+      case 'shoshi': return '第' + it.no + '問';
+      case 'cpa': return '問題' + it.no;
+      case 'benri': return (sec.short || sec.name) + it.no;
+      default: return String(r.items.indexOf(it) + 1);
+    }
   }
 
   /* ================= 学習の記録 ================= */
@@ -931,6 +1279,7 @@
         <label class="setting"><span>効果音の音量 <b id="volv">${s.vol}</b></span><input type="range" min="0" max="100" step="10" value="${s.vol}" data-set="vol"></label>
         <label class="setting"><span>演出（紙吹雪・揺れ・フィーバー）</span>${chk('fx')}</label>
         <label class="setting"><span>口述で試験官の質問を読み上げる</span>${chk('voice')}</label>
+        <label class="setting"><span>解答を表示したままにする（「解答を見る」の状態。オンの間に開いた問題は記録に入りません）</span>${chk('dock')}</label>
         <label class="setting"><span>1日の目標</span><select data-set="goal">${[10, 20, 30, 50].map(n => `<option value="${n}" ${s.goal === n ? 'selected' : ''}>${n}問</option>`).join('')}</select></label>
       </div>
       <h3>記録のバックアップ</h3>
@@ -942,14 +1291,16 @@
       <div class="help">
         <h3>本試験ロード</h3>
         <p>4つの試験それぞれが、本番の段階（短答 → 論文 → 口述など）をステージにした1本の道になっています。「本試験モード」で挑むと、本番と同じ科目構成・配点・合格ラインで判定され、合格すると次のステージへ、不合格なら次の年の挑戦へ進みます。公認会計士の短答（2年）、弁理士の短答・論文（各2年）、司法書士の筆記（次回）は、本番と同じように免除が残ります。</p>
+        <h3>本番の形式</h3>
+        <p>問題は本番の問題冊子の書き方で出します（予備試験は〔第1問〕（配点：2）と解答欄［No.1］、会計士は 問題1 と（5点）、司法書士は 第1問、弁理士は【特許・実用新案】1）。答えは画面の下の答案用紙（マークシート）にマークします。本試験モードは時限ごとに表紙（注意事項と本番の試験時間）から始まり、次の時限へ進むと前の時限の答案は回収されて戻れません。予備試験の一般教養は、選択欄（「選」）と解答欄の両方にマークします。収録問題は本番より少ないので、合否は「収録問題の得点率 × 本番の配点」で判定します。</p>
         <h3>解き方</h3>
-        <p>制限時間はありません（かかった時間は結果に出ます）。画面の下のマークシートで番号を選び、「次へ進む」で答え合わせをして次の問題へ。直前の問題の正誤は、次の問題の上に小さく残ります。「解答を見る」を押すと、PCでは問題の隣、スマホでは問題の下に解答が出たままになります。解答を見た問題は学習記録に入らず、本試験モードではその挑戦が参考記録になります。</p>
+        <p>制限時間はありません。かかった時間は、結果画面で時限ごとに本番の試験時間と比べます。「次へ進む」で答え合わせをして次の問題へ。直前の問題の正誤は、次の問題の上に小さく残ります。「解答を見る」を押すと、PCでは問題の隣、スマホでは問題の下に解答が出ます。「解答を閉じる」を押すまで、次の問題以降も解答を出したままにします。解答を見た問題は学習記録に入らず、本試験モードではその挑戦が参考記録になります。</p>
         <h3>中断と再開</h3>
         <p>「中断」を押すか、2分間操作がないと一時停止します。止まっている間の時間は数えません。ホームに戻っても、解答はこのブラウザに残っていて、「続きを解く」から再開できます。</p>
-        <h3>形式</h3>
-        <p><b>短答・択一</b>：本番の出題形式（5肢択一・組合せ・個数・各肢の正誤・計算）。<br><b>論文・記述</b>：答案を書く代わりに「論点 → 規範 → 結論」や「登記の目的 → 原因 → 添付情報 → 登録免許税」を選び、答案用紙に骨組みを書き込みます。<br><b>口述</b>：試験官の質問に答えます。間違えると副査が助け舟を出します（その後の正解は半分の評価）。</p>
+        <h3>論文・記述・口述</h3>
+        <p><b>論文・記述</b>：答案を書く代わりに「論点 → 規範 → 結論」や「登記の目的 → 原因 → 添付情報 → 登録免許税」を選び、答案用紙に骨組みを書き込みます。司法書士の記述式は本番の答案用紙と同じく欄ごとの表で、添付情報は【添付情報一覧】の記号で答えます。<br><b>口述</b>：試験官の質問に答えます。間違えると副査が助け舟を出します（その後の正解は半分の評価）。</p>
         <h3>この版について</h3>
-        <p>いまは骨子版で、各試験にサンプル問題を少しずつ収録しています。収録のない科目は「準備中」と表示し、合否の判定から外しています。問題はすべて独自作成です。法令・基準の改正や年度ごとの合格点の変動があるため、必ず公式の情報で確認してください。</p>
+        <p>いまは骨子版で、各試験にサンプル問題を少しずつ収録しています。収録のない科目は「準備中」と表示し、合否の判定から外しています。問題はすべて独自作成です。冊子・答案用紙の書き方は公表資料をもとにした再現で、本物の様式ではありません。法令・基準の改正や年度ごとの合格点の変動があるため、必ず公式の情報で確認してください。</p>
       </div>`);
   }
   function drillModal() {
@@ -971,6 +1322,14 @@
     clearTimeout(toastTimer); setTimeout(() => d.remove(), 2700);
   }
   const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  function setDock(on) {
+    S.set.dock = !!on;
+    SQ.store.save();
+    if (!run || view.name !== 'run') return;
+    persist();
+    renderRun(on ? 'dock' : 'keep');
+    if (on && cur().done) toast('次の問題から、解答を表示したままにします');
+  }
 
   /* ================= 操作 ================= */
   const ACT = {
@@ -1003,12 +1362,16 @@
     submit() { submit(); },
     submitNow() { closeModal(false); finish(); },
     nav(d) { goIdx(Number(d.i)); },
+    period(d) { if (road()) return; const p = run.periods[Number(d.p)]; if (p) goIdx(p.from); },
+    openPeriod() { openPeriod(); },
+    nextPeriod() { nextPeriod(); },
     prev() { goIdx(run.idx - 1); },
     next() { if (road()) nextRoad(); else advance(); },
     flag() { const it = cur(); it.flag = !it.flag; persist(); renderRun('keep'); },
-    pick(d) { const it = cur(); if (it.done) return; it.ans = Number(d.i); FX.play('pick'); persist(); renderRun('keep'); FX.bump($('#markbar .mb.on')); },
+    pick(d) { const it = cur(); if (!editable(it)) return; it.ans = Number(d.i); FX.play('pick'); persist(); renderRun('keep'); FX.bump($('#markbar .mb.on:not(.selbox)')); },
+    sel() { const it = cur(); if (!editable(it)) return; it.sel = !it.sel; FX.play('pick'); persist(); renderRun('keep'); },
     tf(d) {
-      const it = cur(); if (it.done) return;
+      const it = cur(); if (!editable(it)) return;
       it.ans = it.ans || []; it.ans[Number(d.i)] = d.v === '1';
       FX.play('pick'); persist(); renderRun('keep');
       FX.bump(document.querySelector(`#markbar [data-act="tf"][data-i="${d.i}"][data-v="${d.v}"]`));
@@ -1016,7 +1379,7 @@
     commit() { commitMcq(); },
     opt(d) {
       const it = cur();
-      if (it.done || it.stepView === 'review') return;
+      if (!editable(it) || it.stepView === 'review') return;
       const s = it.q.steps[it.step], i = Number(d.i);
       if (s.type === 'multi') { const a = it.stepAns[it.step] || []; it.stepAns[it.step] = a.includes(i) ? a.filter(x => x !== i) : a.concat(i).sort((x, y) => x - y); }
       else it.stepAns[it.step] = i;
@@ -1027,18 +1390,8 @@
     oralStart() { oralBegin(); },
     oralPick(d) { oralAnswer(Number(d.i)); },
     oralNext() { oralNext(); },
-    reveal() {
-      const it = cur();
-      if (it.revealed && it.dock) { it.dock = false; persist(); return renderRun('keep'); }
-      if (!it.revealed) {
-        it.revealed = true; run.peeked++; run.combo = 0; FX.fever(false);
-        if (road() && run.peeked === 1) toast('解答を見たので、この挑戦は参考記録になります');
-      }
-      it.dock = true;
-      persist();
-      renderRun('dock');
-    },
-    closeDock() { cur().dock = false; persist(); renderRun('keep'); },
+    reveal() { setDock(!S.set.dock); },
+    closeDock() { setDock(false); },
     export() {
       const blob = new Blob([SQ.store.exportText()], { type: 'application/json' });
       const a = document.createElement('a');
@@ -1051,7 +1404,7 @@
       SQ.store.reset(); S = SQ.store.S; closeModal(false); go('home', {}, true); toast('記録を消しました');
     }
   };
-  const OWN_SOUND = { closeModal: 1, pick: 1, tf: 1, opt: 1, oralPick: 1, commit: 1, commitStep: 1, road: 1, practice: 1, drillGo: 1, weak: 1, next: 1, resumeRun: 1 };
+  const OWN_SOUND = { closeModal: 1, pick: 1, sel: 1, tf: 1, opt: 1, oralPick: 1, commit: 1, commitStep: 1, road: 1, practice: 1, drillGo: 1, weak: 1, next: 1, resumeRun: 1, openPeriod: 1, nextPeriod: 1 };
   document.addEventListener('click', ev => {
     const el = ev.target.closest('[data-act]');
     if (!el || el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.disabled) return;
@@ -1065,6 +1418,7 @@
     const el = ev.target;
     if (el.dataset.set) {
       const k = el.dataset.set;
+      if (k === 'dock') { setDock(el.checked); return; }
       S.set[k] = el.type === 'checkbox' ? el.checked : el.type === 'range' || k === 'goal' ? Number(el.value) : el.value;
       if (k === 'vol') FX.setVol();
       if (k === 'fx') document.body.classList.toggle('lite', !S.set.fx);
@@ -1086,10 +1440,11 @@
     if (modalRoot.innerHTML) { if (ev.key === 'Escape') closeModal(); return; }
     if (view.name !== 'run' || !run || run.paused || ev.target.closest('input,select,textarea')) return;
     const it = cur(), n = Number(ev.key);
+    if (covering(it)) { if (ev.key === 'Enter') { ev.preventDefault(); openPeriod(); } return; }
     if (n >= 1 && n <= 9) {
-      if (it.q.kind === 'mcq' && it.q.form !== 'tf' && !it.done && n <= SQ.mcqKey(it.q).choices.length) return ACT.pick({ i: n - 1 });
-      if (it.q.kind === 'case' && !it.done && it.stepView !== 'review' && n <= it.q.steps[it.step].options.length) return ACT.opt({ i: n - 1 });
-      if (it.q.kind === 'oral' && it.started && !it.done && it.oralPhase !== 'review' && n <= it.q.turns[it.turn].options.length) return oralAnswer(n - 1);
+      if (it.q.kind === 'mcq' && it.q.form !== 'tf' && editable(it) && n <= SQ.mcqKey(it.q).choices.length) return ACT.pick({ i: n - 1 });
+      if (it.q.kind === 'case' && editable(it) && it.stepView !== 'review' && n <= it.q.steps[it.step].options.length) return ACT.opt({ i: n - 1 });
+      if (it.q.kind === 'oral' && it.started && editable(it) && it.oralPhase !== 'review' && n <= it.q.turns[it.turn].options.length) return oralAnswer(n - 1);
     }
     if (ev.key === 'Enter') {
       const b = document.querySelector('#markbar .mnav .primary:not([disabled])');
@@ -1106,7 +1461,12 @@
     const now = Date.now(), d = now - lastTick;
     lastTick = now;
     if (!run || run.finished || run.paused || view.name !== 'run') return;
-    if (!document.hidden && d < 5000) run.elapsed += d / 1000;
+    const it = cur();
+    // 表紙を読んでいる間は数えない（本番も「始め」の合図から）
+    if (!document.hidden && d < 5000 && !covering(it)) {
+      run.elapsed += d / 1000;
+      if (hasP() && run.pElapsed[it.pno] != null) run.pElapsed[it.pno] += d / 1000;
+    }
     const speaking = window.speechSynthesis && speechSynthesis.speaking;
     if (speaking) idleAt = now;
     else if (now - idleAt >= IDLE) pause('idle');

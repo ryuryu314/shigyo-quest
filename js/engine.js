@@ -1,5 +1,7 @@
 /* 士業ドパミンクエスト — 採点と本試験ロードの進行
- * 問題の正解・配点は乱数で加工しない。採点区分ごとの得点率に本番の配点を掛けて「本番換算」する。
+ * 問題の正解・配点は乱数で加工しない。
+ * 1問ごとの配点は本番どおり（予備試験 2点・3点、会計士 5点・6点、司法書士 3点、弁理士 1点）。
+ * 採点区分ごとの得点率に本番の配点を掛けて「本番換算」する（収録問題は本番より少ないため）。
  * 収録問題がない採点区分は判定から外し、その旨を結果画面に出す。
  */
 (function () {
@@ -8,33 +10,135 @@
 
   SQ.poolOf = (examId, stageId, secId) => SQ.Q.filter(q => q.exam === examId && q.stage === stageId && (!secId || q.sec === secId));
   SQ.secOf = q => { const st = SQ.stage(q.exam, q.stage); return st && st.sections.find(s => s.id === q.sec); };
+  SQ.paperOf = q => { const st = SQ.stage(q.exam, q.stage); return (st && st.paper) || null; };
+  SQ.styleOf = q => { const p = SQ.paperOf(q); return p ? p.style : ''; };
+
+  /* ---------- 1問の配点（本番の問題冊子に書かれる点数） ---------- */
+  SQ.ptsOf = function (q) {
+    if (q.pts) return q.pts;
+    if (q.kind !== 'mcq') return 0; // 論文・記述・口述は採点区分の配点を問題数で割る（newRun）
+    switch (SQ.styleOf(q)) {
+      case 'yobi': return q.sec === 'kyoyo' ? 3 : (q.form === 'tf' && q.st.length >= 3 ? 3 : 2);
+      case 'cpa': return q.sec === 'zaimu' ? 6 : q.sec === 'kanri' ? (q.form === 'pick' ? 6 : 5) : 5;
+      case 'shoshi': return 3;
+      case 'benri': return 1;
+      default: return 1;
+    }
+  };
 
   /* ---------- 1回分の挑戦（ラン）を作る ---------- */
   // opt: { exam, stage, mode: 'road' | 'practice', ids?: [...], label? }
   SQ.newRun = function (opt) {
-    let items, stage = opt.stage ? SQ.stage(opt.exam, opt.stage) : null;
-    if (opt.ids) items = opt.ids.map(id => SQ.byId[id]).filter(Boolean);
-    else items = stage.sections.flatMap(sec => SQ.poolOf(opt.exam, stage.id, sec.id));
-    const count = {};
-    items.forEach(q => { const k = q.exam + '/' + q.stage + '/' + q.sec; count[k] = (count[k] || 0) + 1; });
-    const slots = items.map(q => {
-      const sec = SQ.secOf(q), k = q.exam + '/' + q.stage + '/' + q.sec;
-      return Object.assign({ id: q.id, q, max: stage ? sec.points / count[k] : 1 }, blankItem());
+    const stage = opt.stage ? SQ.stage(opt.exam, opt.stage) : null;
+    const paper = stage && stage.paper;
+    let qs;
+    if (opt.ids) qs = opt.ids.map(id => SQ.byId[id]).filter(Boolean);
+    else if (paper) qs = paperOrder(stage);
+    else qs = stage.sections.flatMap(sec => SQ.poolOf(opt.exam, stage.id, sec.id));
+
+    // 時限（本番の時間割）。収録問題がある時限だけを残す
+    let periods = [];
+    const pidOf = q => (q.period && paper.periods.some(p => p.id === q.period)) ? q.period : (paper.periods.find(p => p.secs.includes(q.sec)) || paper.periods[0]).id;
+    if (paper) {
+      periods = paper.periods.filter(p => qs.some(q => pidOf(q) === p.id)).map(p => Object.assign({}, p, { from: -1, to: -1 }));
+    }
+    const slots = qs.map(q => Object.assign({ id: q.id, q, pno: 0, no: 0, boxes: [], pts: 0, max: 1 }, blankItem()));
+    slots.forEach((it, i) => {
+      if (paper) {
+        it.pno = periods.findIndex(p => p.id === pidOf(it.q));
+        const p = periods[it.pno];
+        if (p.from < 0) p.from = i;
+        p.to = i;
+      }
     });
-    // 制限時間はない。elapsed は止まっていない間だけ数えた秒数（結果画面に出す）。
+    numberItems(slots, periods, !!paper);
+
+    // 配点：択一は本番の1問の点数、論文・口述は採点区分の配点を収録問題数で割る
+    const count = {};
+    slots.forEach(it => { const k = it.q.exam + '/' + it.q.stage + '/' + it.q.sec; count[k] = (count[k] || 0) + 1; });
+    slots.forEach(it => {
+      const sec = SQ.secOf(it.q), k = it.q.exam + '/' + it.q.stage + '/' + it.q.sec;
+      it.pts = SQ.ptsOf(it.q) || (sec ? sec.points / count[k] : 1);
+    });
+    // 本番換算の重み：採点区分の配点を、収録問題の配点の比で分ける
+    if (stage) {
+      const sum = {};
+      slots.forEach(it => { sum[it.q.sec] = (sum[it.q.sec] || 0) + it.pts; });
+      slots.forEach(it => { const sec = SQ.secOf(it.q); it.max = sec.points * it.pts / sum[it.q.sec]; });
+    }
+    // 一般教養の選択：本番は44題から20題。収録数に比例させて選ぶ題数を決める（最低1題）
+    const select = {};
+    periods.forEach(p => {
+      if (!p.select) return;
+      p.secs.forEach(secId => {
+        const k = slots.filter(it => it.q.sec === secId).length;
+        if (k) select[secId] = Math.max(1, Math.min(k, Math.round(k * p.select.pick / p.select.of)));
+      });
+    });
+
+    // 制限時間はない。elapsed は止まっていない間だけ数えた秒数（結果画面に出す）。pElapsed は時限ごと。
+    // opened: 表紙（注意事項）を閉じて解き始めた時限。本試験モードでは curP より前の時限は回収済み（解き直せない）
+    const road = opt.mode === 'road';
     return {
       exam: opt.exam || null, stage: stage ? stage.id : null, mode: opt.mode || 'practice', label: opt.label || '',
       items: slots, idx: 0, started: Date.now(), elapsed: 0,
+      periods, select, opened: periods.map(() => !road), pElapsed: periods.map(() => 0), curP: 0,
       combo: 0, maxCombo: 0, get: 0, xp: 0, peeked: 0, interrupted: false, paused: false, lastJudge: null, finished: false
     };
   };
-  const ITEM_KEYS = ['ans', 'score', 'done', 'flag', 'step', 'stepAns', 'stepScore', 'stepView', 'turn', 'tries', 'turnScore', 'started', 'oralPhase', 'wrongPick', 'lastPick', 'react', 'revealed', 'dock'];
+
+  // 本番の冊子の順：時限 → その時限の科目の順 → 会計士の管理会計論・財務会計論は理論問題が先 → 収録順
+  function paperOrder(stage) {
+    const out = [];
+    const seen = new Set();
+    stage.paper.periods.forEach(p => {
+      p.secs.forEach(secId => {
+        let qs = SQ.poolOf(SQ.examOfStage(stage), stage.id, secId).filter(q => !q.period || q.period === p.id);
+        if (stage.paper.style === 'cpa') qs = qs.filter(q => q.form !== 'pick').concat(qs.filter(q => q.form === 'pick'));
+        qs.forEach(q => { if (!seen.has(q.id)) { seen.add(q.id); out.push(q); } });
+      });
+    });
+    // どの時限にも入らない問題（データの誤り）も落とさない
+    stage.sections.forEach(sec => SQ.poolOf(SQ.examOfStage(stage), stage.id, sec.id).forEach(q => { if (!seen.has(q.id)) { seen.add(q.id); out.push(q); } }));
+    return out;
+  }
+  SQ.examOfStage = stage => (SQ.EXAMS.find(e => e.stages.includes(stage)) || {}).id;
+
+  // 問題番号と解答欄番号（本番の冊子の付け方）
+  //   予備試験  ：時限の冊子ごとに〔第1問〕から通し番号。解答欄［No.］も時限ごとに1から。各記述の正誤（tf）は記述ごとに1欄
+  //   会計士    ：科目（時限）ごとに 問題1 から
+  //   司法書士  ：部ごとに 第1問 から。記述式は 第36問・第37問（問題に no を書く）
+  //   弁理士    ：科目ごとに【特許・実用新案】1 から
+  //   ドリルなど：出題順の通し番号
+  function numberItems(slots, periods, byPaper) {
+    const box = {}, cnt = {};
+    slots.forEach((it, i) => {
+      const q = it.q, style = SQ.styleOf(q);
+      if (!byPaper) {
+        it.no = i + 1;
+        const b = (box.all = (box.all || 0));
+        const n = q.kind === 'mcq' && q.form === 'tf' ? q.st.length : 1;
+        it.boxes = Array.from({ length: n }, (_, k) => b + k + 1);
+        box.all = b + n;
+        return;
+      }
+      const key = style === 'benri' ? 'sec:' + q.sec : 'p:' + it.pno;
+      if (q.no) it.no = q.no;
+      else { cnt[key] = (cnt[key] || 0) + 1; it.no = cnt[key]; }
+      const bk = 'p:' + it.pno, b = box[bk] || 0;
+      const n = q.kind === 'mcq' && q.form === 'tf' ? q.st.length : 1;
+      it.boxes = Array.from({ length: n }, (_, k) => b + k + 1);
+      box[bk] = b + n;
+    });
+  }
+
+  const ITEM_KEYS = ['ans', 'score', 'done', 'flag', 'step', 'stepAns', 'stepScore', 'stepView', 'turn', 'tries', 'turnScore', 'started', 'oralPhase', 'wrongPick', 'lastPick', 'react', 'revealed', 'sel'];
   function blankItem() {
-    return { ans: null, score: null, done: false, flag: false, step: 0, stepAns: [], stepScore: [], stepView: null, turn: 0, tries: 0, turnScore: [], started: false, oralPhase: null, wrongPick: null, lastPick: null, react: '', revealed: false, dock: false };
+    return { ans: null, score: null, done: false, flag: false, step: 0, stepAns: [], stepScore: [], stepView: null, turn: 0, tries: 0, turnScore: [], started: false, oralPhase: null, wrongPick: null, lastPick: null, react: '', revealed: false, sel: false };
   }
 
   /* ---------- 中断と再開（このブラウザに保存） ---------- */
-  const RUN_KEYS = ['exam', 'stage', 'mode', 'label', 'idx', 'started', 'elapsed', 'combo', 'maxCombo', 'get', 'xp', 'peeked', 'interrupted', 'lastJudge'];
+  const RUN_KEYS = ['exam', 'stage', 'mode', 'label', 'idx', 'started', 'elapsed', 'combo', 'maxCombo', 'get', 'xp', 'peeked', 'interrupted', 'lastJudge', 'opened', 'pElapsed', 'curP'];
   SQ.saveRun = function (run) {
     const d = { v: 1, ids: run.items.map(it => it.id), items: run.items.map(it => { const o = {}; ITEM_KEYS.forEach(k => { o[k] = it[k]; }); return o; }) };
     RUN_KEYS.forEach(k => { d[k] = run[k]; });
@@ -48,7 +152,12 @@
       const run = SQ.newRun({ exam: d.exam, stage: d.stage, mode: d.mode, ids: d.ids, label: d.label });
       RUN_KEYS.forEach(k => { if (d[k] !== undefined) run[k] = d[k]; });
       run.items.forEach((it, i) => { const o = d.items[i] || {}; ITEM_KEYS.forEach(k => { if (o[k] !== undefined) it[k] = o[k]; }); });
+      const n = run.periods.length;
+      const fix = (a, def) => Array.from({ length: n }, (_, i) => (Array.isArray(a) && a[i] !== undefined ? a[i] : def));
+      run.opened = fix(run.opened, run.mode !== 'road');
+      run.pElapsed = fix(run.pElapsed, 0).map(v => (Number.isFinite(v) && v >= 0 ? v : 0));
       run.idx = SQ.clamp(Math.floor(run.idx) || 0, 0, run.items.length - 1);
+      run.curP = SQ.clamp(Math.floor(run.curP) || 0, 0, Math.max(0, n - 1));
       run.elapsed = Number.isFinite(run.elapsed) && run.elapsed >= 0 ? run.elapsed : 0;
       run.paused = false; run.finished = false;
       return run;
@@ -56,6 +165,8 @@
   };
 
   /* ---------- 採点 ---------- */
+  // 各記述の正誤（tf）は、全部合えば満点、3つ以上の記述で1つ違いなら3分の1（本番も部分点がある問題があるが、
+  // 基準は問題文に書かれない。本アプリは「3点の問題で1つ誤りは1点」に当たる近似）
   SQ.judgeMcq = function (q, ans) {
     if (q.form === 'tf') {
       const n = q.st.length;
@@ -85,6 +196,14 @@
   };
   SQ.oralScore = (q, turnScore) => q.turns.reduce((a, t, i) => a + (turnScore[i] || 0), 0) / q.turns.length;
 
+  // 一般教養の選択：選択欄にマークした問題のうち、問題番号の小さい方から指定題数までを採点する
+  SQ.countedSet = function (run, secId) {
+    const S = run.select[secId];
+    if (!S) return null;
+    const sel = run.items.filter(it => it.q.sec === secId && it.sel).sort((a, b) => a.no - b.no);
+    return new Set(sel.slice(0, S));
+  };
+
   /* ---------- 段階の合否判定 ---------- */
   const oral60 = r => r >= 0.999 ? 63 : r >= 0.8 ? 62 : r >= 0.66 ? 61 : r >= 0.5 ? 60 : r >= 0.33 ? 59 : r >= 0.16 ? 58 : r > 0 ? 57 : 56;
   const abc = r => r >= 0.8 ? 'A' : r >= 0.5 ? 'B' : 'C';
@@ -93,16 +212,41 @@
   SQ.evalRun = function (run) {
     const answered = run.items.filter(it => it.done);
     const raw = run.items.reduce((a, it) => a + (it.score || 0), 0) / Math.max(1, run.items.length);
+    // 素点：収録問題での本番どおりの点数（一般教養は採点される問題だけ）
+    let rawGot = 0, rawMax = 0;
+    const counted = {};
+    Object.keys(run.select || {}).forEach(secId => { counted[secId] = SQ.countedSet(run, secId); });
+    run.items.forEach(it => {
+      const set = counted[it.q.sec];
+      if (set) return;
+      rawGot += (it.score || 0) * it.pts; rawMax += it.pts;
+    });
+    Object.keys(counted).forEach(secId => {
+      const set = counted[secId], S = run.select[secId];
+      const pts = (run.items.find(it => it.q.sec === secId) || {}).pts || 0;
+      set.forEach(it => { rawGot += (it.score || 0) * it.pts; });
+      rawMax += S * pts;
+    });
     const base = {
-      raw, answered: answered.length, total: run.items.length,
+      raw, answered: answered.length, total: run.items.length, rawGot, rawMax,
       perfect: run.items.filter(it => (it.score || 0) >= 0.999).length
     };
     if (!run.stage) return Object.assign(base, { practiceOnly: true, ratio: raw, rank: SQ.rankOf(raw) });
 
     const stage = SQ.stage(run.exam, run.stage), rule = stage.rule;
+    const notes = [];
     const secs = stage.sections.map(sec => {
       const its = run.items.filter(it => it.q.sec === sec.id);
       if (!its.length) return { sec, included: false };
+      const set = counted[sec.id];
+      if (set) {
+        const S = run.select[sec.id], pts = its[0].pts;
+        const got = Array.from(set).reduce((a, it) => a + (it.score || 0) * pts, 0);
+        const nsel = its.filter(it => it.sel).length;
+        notes.push(sec.name + '：' + its.length + '題中' + S + '題を選んで解答（本番は' + stage.paper.periods.find(p => p.secs.includes(sec.id)).select.of + '題中' + stage.paper.periods.find(p => p.secs.includes(sec.id)).select.pick + '題）。選択欄にマークしたのは' + nsel + '題' +
+          (nsel > S ? '。指定題数を超えたので、問題番号の小さい方から' + S + '題を採点しました。' : nsel < S ? '。選んでいない分は0点です。' : '。'));
+        return { sec, included: true, ratio: got / (S * pts), got, max: S * pts, n: its.length, sel: nsel };
+      }
       const max = its.reduce((a, it) => a + it.max, 0);
       const got = its.reduce((a, it) => a + (it.score || 0) * it.max, 0);
       return { sec, included: true, ratio: got / max, got, max, n: its.length };
@@ -112,7 +256,7 @@
     const E = inc.reduce((a, s) => a + s.ratio * s.sec.points, 0);
     const ratio = P ? E / P : 0;
     const fullPts = stage.sections.reduce((a, s) => a + s.points, 0);
-    const res = Object.assign(base, { secs, ratio, rank: SQ.rankOf(ratio), missing: secs.filter(s => !s.included).map(s => s.sec.name), notes: [] });
+    const res = Object.assign(base, { secs, ratio, rank: SQ.rankOf(ratio), missing: secs.filter(s => !s.included).map(s => s.sec.name), notes });
 
     switch (rule.type) {
       case 'total': {

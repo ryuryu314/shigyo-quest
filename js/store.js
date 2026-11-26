@@ -3,7 +3,8 @@
   'use strict';
   const SQ = window.SQ;
   const KEY = 'shigyo-quest-v1';
-  const DEF_SET = { vol: 60, fx: true, voice: true, goal: 20 };
+  // dock: 「解答を見る」で開いた解答を、閉じるまで次の問題以降も出しておく（開閉を覚える）
+  const DEF_SET = { vol: 60, fx: true, voice: true, goal: 20, dock: false };
   // suspended: 中断した挑戦（1つだけ）。SQ.saveRun の形
   const fresh = () => ({ v: 1, xp: 0, days: {}, stats: {}, roads: {}, best: {}, targets: {}, suspended: null, set: Object.assign({}, DEF_SET), created: Date.now() });
 

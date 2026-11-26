@@ -10,7 +10,7 @@
 (function () {
   'use strict';
   const SQ = window.SQ = window.SQ || {};
-  SQ.VERSION = '0.2.0';
+  SQ.VERSION = '0.3.0';
   SQ.Q = [];
   SQ.byId = {};
   SQ.dataErrors = [];
@@ -74,6 +74,18 @@
         const answer = counts.indexOf(label);
         return { choices: counts.map((c, i) => ({ no: i + 1, text: c })), answer, labels, hits: answer >= 0 ? 1 : 0 };
       }
+      case 'ox': {
+        // 予備試験の「正しいものには○、誤っているものには×を付した場合の組合せ」（3記述なら1〜8）。
+        // 並びは本番どおり ○○○ → ○○× → ○×○ → ○×× → ×○○ → ×○× → ××○ → ×××
+        const n = st.length, choices = [];
+        let answer = -1;
+        for (let k = 0; k < (1 << n); k++) {
+          const marks = st.map((s, i) => !((k >> (n - 1 - i)) & 1));
+          if (marks.every((m, i) => m === st[i][2])) answer = k;
+          choices.push({ no: k + 1, text: labels.map((l, i) => l + (marks[i] ? '○' : '×')).join(' ') });
+        }
+        return { choices, answer, labels, hits: answer >= 0 ? 1 : 0 };
+      }
       case 'pick':
         return { choices: item.choices.map((c, i) => ({ no: i + 1, text: Array.isArray(c) ? c[0] : c })), answer: item.answer, labels, hits: 1 };
       case 'tf':
@@ -94,9 +106,11 @@
       if (!q.title) err.push(where + 'title がない');
       if (!SQ.easyOf(q)) err.push(where + '「かんたんに言うと」がない（data/easy.js）');
       if (q.kind === 'mcq') {
-        if (!['one', 'combo', 'count', 'pick', 'tf'].includes(q.form)) { err.push(where + 'form が不正（' + q.form + '）'); continue; }
+        if (!['one', 'combo', 'count', 'pick', 'tf', 'ox'].includes(q.form)) { err.push(where + 'form が不正（' + q.form + '）'); continue; }
         if (!q.q) err.push(where + '問題文 q がない');
         if (q.form !== 'pick' && (!q.st || q.st.length < 2)) err.push(where + '記述 st が足りない');
+        if (q.form === 'ox' && q.st && q.st.length !== 3) err.push(where + '○×の組合せ（ox）は記述3つにする（選択肢1〜8）');
+        if (q.pts != null && !(q.pts > 0)) err.push(where + '配点 pts が不正');
         if (q.form === 'pick' && (!q.choices || q.answer == null || !q.choices[q.answer])) err.push(where + 'choices / answer が不正');
         const key = SQ.mcqKey(q);
         if (q.form === 'combo' && key.choices.some(c => c.bad)) err.push(where + '組合せに存在しない記述ラベルがある');
@@ -126,4 +140,11 @@
   SQ.today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   SQ.fmtTime = sec => { sec = Math.max(0, Math.round(sec)); const m = Math.floor(sec / 60), s = sec % 60; return m >= 60 ? Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0') + ':' + String(s).padStart(2, '0') : m + ':' + String(s).padStart(2, '0'); };
   SQ.round1 = v => Math.round(v * 10) / 10;
+
+  /* ---------- 問題冊子の数字の書き方 ---------- */
+  const ZEN = '０１２３４５６７８９';
+  // 全角数字（法務省の冊子は本文の数字が全角）
+  SQ.zenAll = s => String(s).replace(/[0-9]/g, d => ZEN[d]);
+  // 1桁だけ全角（「〔第１問〕」「〔第13問〕」、特許庁の「第29条第１項第３号」）
+  SQ.zen1 = s => String(s).replace(/(^|[^0-9.,])([0-9])(?![0-9])/g, (m, a, d) => a + ZEN[d]);
 })();

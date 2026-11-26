@@ -38,6 +38,7 @@
   /* 2. 正解を選ぶ・外す関数 */
   function solve(it, good) {
     const q = it.q;
+    if (q.sec === 'kyoyo') it.sel = true; // 一般教養は選択欄にもマークする
     if (q.kind === 'mcq') {
       if (q.form === 'tf') it.ans = q.st.map(s => good ? s[2] : !s[2]);
       else { const k = SQ.mcqKey(q); it.ans = good ? k.answer : (k.answer + 1) % k.choices.length; }
@@ -138,10 +139,11 @@
   (function () {
     const r = SQ.newRun({ exam: 'shoshi', stage: 'hikki', mode: 'road' });
     solve(r.items[0], true); solve(r.items[1], false);
-    r.items[2].ans = 1; r.items[3].flag = true; r.items[4].revealed = true; r.items[4].dock = true;
+    r.items[2].ans = 1; r.items[3].flag = true; r.items[4].revealed = true;
     const kase = r.items.find(it => it.q.kind === 'case');
     kase.step = 2; kase.stepAns = [0, 0]; kase.stepScore = [1, 0];
     r.idx = 5; r.elapsed = 123.4; r.combo = 2; r.get = 7.5; r.peeked = 1; r.interrupted = true;
+    r.opened = [true, false]; r.pElapsed = [61.5, 0]; r.curP = 0;
     const saved = JSON.parse(JSON.stringify(SQ.saveRun(r)));
     const back = SQ.loadRun(saved);
     check(!!back && back.items.length === r.items.length, '保存した挑戦を読み戻せる');
@@ -150,8 +152,57 @@
     const bk = back.items.find(it => it.q.kind === 'case');
     check(bk.step === 2 && bk.stepScore[0] === 1 && bk.stepAns[1] === 0, '論文・記述のとちゅうの段落が戻る');
     check(back.mode === 'road' && back.stage === 'hikki' && Math.abs(back.items[0].max - r.items[0].max) < 1e-9, 'モード・段階・配点が戻る');
+    check(back.opened[0] === true && back.opened[1] === false && back.pElapsed[0] === 61.5 && back.curP === 0, '時限の表紙・時限ごとの時間・今の時限が戻る');
     const broken = JSON.parse(JSON.stringify(saved)); broken.ids[0] = 'no-such-id';
     check(SQ.loadRun(broken) === null, '問題が消えた中断データは読み込まない');
+  })();
+
+  /* 6b. 本番の形式（時限・問題番号・解答欄・配点・一般教養の選択） */
+  log('\n■ 本番の形式');
+  (function () {
+    const y = SQ.newRun({ exam: 'yobi', stage: 'tanto', mode: 'road' });
+    check(y.periods.map(p => p.id).join(',') === 'minji,kenko,keiji,kyoyo', '予備 短答：時限は 民法・商法・民訴 → 憲法・行政法 → 刑法・刑訴 → 一般教養（' + y.periods.map(p => p.name).join(' → ') + '）');
+    check(y.opened.every(v => v === false) && SQ.newRun({ exam: 'yobi', stage: 'tanto', mode: 'practice' }).opened.every(v => v === true), '本試験モードは時限ごとに表紙から、練習モードは表紙なし');
+    const first = y.items[0];
+    check(first.q.sec === 'minpo' && first.no === 1 && first.boxes.join() === '1' && first.pts === 2, '予備：最初は民法〔第1問〕（配点：2）解答欄［No.1］');
+    const k1 = y.items.find(it => it.id === 'yobi-kenpo-01'), k2 = y.items.find(it => it.id === 'yobi-kenpo-02');
+    check(k1.no === 1 && k1.boxes.join() === '1,2,3' && k1.pts === 3, '予備：憲法・行政法の冊子は〔第1問〕から。各記述の正誤（3記述）は［No.1］〜［No.3］で配点3（' + k1.boxes.join(',') + '）');
+    check(k2.no === 2 && k2.boxes.join() === '4' && k2.pts === 2, '予備：続く○×の組合せは〔第2問〕［No.4］配点2');
+    const key2 = SQ.mcqKey(k2.q);
+    check(key2.choices.length === 8 && key2.answer === 4 && key2.choices[4].text === 'ア× イ○ ウ○', '○×の組合せは1〜8の本番の並び（正解 5：' + key2.choices[key2.answer].text + '）');
+    const ky = y.items.filter(it => it.q.sec === 'kyoyo');
+    check(ky.length >= 5 && y.select.kyoyo === Math.max(1, Math.round(ky.length * 20 / 44)) && ky.every(it => it.pts === 3), '一般教養：' + ky.length + '題から' + y.select.kyoyo + '題を選択（本番44題中20題の比率）・1問3点');
+    ky.forEach(it => { it.done = true; it.score = 1; it.ans = 0; });
+    ky[0].sel = false; ky[1].sel = true; ky[2].sel = true; ky[3].sel = true; ky[4].sel = false;
+    ky[2].score = 0;
+    const set = SQ.countedSet(y, 'kyoyo');
+    check(set.size === 2 && set.has(ky[1]) && set.has(ky[2]) && !set.has(ky[3]), '一般教養：指定数を超えて選ぶと、問題番号の小さい方から採点（選択3題 → 第' + ky[1].no + '問・第' + ky[2].no + '問）');
+    const ry = SQ.evalRun(y), sk = ry.secs.find(s => s.sec.id === 'kyoyo');
+    check(Math.abs(sk.ratio - 0.5) < 1e-9 && Math.abs(sk.show - 30) < 1e-9, '一般教養：採点した2題のうち1題正解で 30 / 60（' + SQ.round1(sk.show) + '）');
+
+    const c = SQ.newRun({ exam: 'cpa', stage: 'tanto', mode: 'road' });
+    check(c.periods.map(p => p.id).join(',') === 'kigyo,kanri,kansa,zaimu', '会計士 短答：企業法 → 管理会計論 → 監査論 → 財務会計論');
+    const z = c.items.filter(it => it.q.sec === 'zaimu');
+    check(z[0].q.form !== 'pick' && z.every((it, i) => it.no === i + 1) && z.every(it => it.pts === 6), '会計士：財務会計論は理論問題が先、問題1から、各6点');
+    const kg = c.items.filter(it => it.q.sec === 'kigyo'), km = c.items.filter(it => it.q.sec === 'kanri');
+    check(kg.every(it => it.pts === 5) && km.every(it => it.pts === (it.q.form === 'pick' ? 6 : 5)), '会計士：企業法は各5点、管理会計論は理論5点・計算6点');
+    check(SQ.mcqKey(kg[0].q).choices.length === 6, '会計士：選択肢は1〜6');
+
+    const s = SQ.newRun({ exam: 'shoshi', stage: 'hikki', mode: 'road' });
+    const gogo = s.items.filter(it => it.pno === 1);
+    const tak = gogo.filter(it => it.q.kind === 'mcq'), kij = gogo.filter(it => it.q.kind === 'case');
+    check(s.periods.map(p => p.name).join() === '午前の部,午後の部' && tak.every((it, i) => it.no === i + 1) && kij.map(it => it.no).join() === '36,37', '司法書士：午後の部は択一が第1問から、記述式は第36問・第37問');
+    check(s.items.filter(it => it.q.kind === 'mcq').every(it => it.pts === 3) && kij.every(it => it.pts === 70), '司法書士：択一1問3点・記述式1問70点');
+
+    const b = SQ.newRun({ exam: 'benri', stage: 'tanto', mode: 'road' });
+    const bi = b.items.filter(it => it.q.sec === 'isho'), bt = b.items.filter(it => it.q.sec === 'tokkyo');
+    check(bt.map(it => it.no).join() === bt.map((x, i) => i + 1).join() && bi[0].no === 1 && b.items.every(it => it.pts === 1), '弁理士：科目ごとに【特許・実用新案】1・【意匠】1…と番号を振り、1題1点');
+
+    const r = SQ.newRun({ exam: 'yobi', stage: 'tanto', mode: 'practice' });
+    r.items.forEach(it => solve(it, true));
+    const res = SQ.evalRun(r);
+    const expMax = r.items.filter(it => it.q.sec !== 'kyoyo').reduce((a, it) => a + it.pts, 0) + r.select.kyoyo * 3;
+    check(Math.abs(res.rawMax - expMax) < 1e-9 && Math.abs(res.rawGot - expMax) < 1e-9, '素点：収録問題の本番どおりの点数で ' + res.rawGot + ' / ' + res.rawMax);
   })();
 
   /* 7. レベル */
