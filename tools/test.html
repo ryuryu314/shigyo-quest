@@ -155,6 +155,13 @@
     check(back.opened[0] === true && back.opened[1] === false && back.pElapsed[0] === 61.5 && back.curP === 0, '時限の表紙・時限ごとの時間・今の時限が戻る');
     const broken = JSON.parse(JSON.stringify(saved)); broken.ids[0] = 'no-such-id';
     check(SQ.loadRun(broken) === null, '問題が消えた中断データは読み込まない');
+    // 時限のなかった前の版（v0.2.0）の中断データ：開いていた問題の時限から再開できる
+    const y = SQ.newRun({ exam: 'yobi', stage: 'tanto', mode: 'road' });
+    const old = JSON.parse(JSON.stringify(SQ.saveRun(y)));
+    delete old.opened; delete old.pElapsed; delete old.curP;
+    old.idx = y.items.findIndex(it => it.pno === 2);
+    const ob = SQ.loadRun(old);
+    check(!!ob && ob.curP === 2 && ob.opened.join() === 'true,true,false,false' && ob.pElapsed.every(v => v === 0), '前の版の中断データ：開いていた問題の時限（3時限目）から、表紙つきで再開できる');
   })();
 
   /* 6b. 本番の形式（時限・問題番号・解答欄・配点・一般教養の選択） */

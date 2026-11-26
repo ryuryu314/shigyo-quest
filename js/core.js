@@ -10,7 +10,7 @@
 (function () {
   'use strict';
   const SQ = window.SQ = window.SQ || {};
-  SQ.VERSION = '0.3.0';
+  SQ.VERSION = '0.3.1';
   SQ.Q = [];
   SQ.byId = {};
   SQ.dataErrors = [];

@@ -158,6 +158,13 @@
       run.pElapsed = fix(run.pElapsed, 0).map(v => (Number.isFinite(v) && v >= 0 ? v : 0));
       run.idx = SQ.clamp(Math.floor(run.idx) || 0, 0, run.items.length - 1);
       run.curP = SQ.clamp(Math.floor(run.curP) || 0, 0, Math.max(0, n - 1));
+      // 時限のなかった版（v0.2.0）で中断した挑戦：開いていた問題の時限を「今の時限」にし、それより前の時限は解き始めた扱いにする
+      if (n && run.mode === 'road') {
+        const p = run.items[run.idx].pno;
+        if (d.curP === undefined) run.curP = p;
+        run.curP = Math.max(run.curP, p);
+        if (!Array.isArray(d.opened)) run.opened = run.opened.map((v, i) => i < run.curP);
+      }
       run.elapsed = Number.isFinite(run.elapsed) && run.elapsed >= 0 ? run.elapsed : 0;
       run.paused = false; run.finished = false;
       return run;
